@@ -1,0 +1,13 @@
+# entornos y caches
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# datos: pesados y con datos de registros (se descargan con backend/data/demo/download_demos.sh)
+backend/data/demo/*.edf
+backend/data/store/
+
+# temporales
+*.part

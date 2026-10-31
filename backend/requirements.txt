@@ -1,0 +1,26 @@
+# Dependencias de la API de SomnoAI v2 (estadificación del sueño).
+#
+# Versiones fijadas: son las que ya convivían sin conflictos en el entorno de v1.
+
+# ── API ──────────────────────────────────────────────
+fastapi==0.141.1            # framework de la API (contrato en docs/API_CONTRACT.md)
+uvicorn[standard]==0.52.4   # servidor ASGI (backend/run.sh)
+python-multipart==0.0.32    # carga de archivos multipart (POST /analyses)
+
+# ── señal y EDF ──────────────────────────────────────
+numpy==1.26.4
+scipy==1.13.1
+mne==1.12.1                 # lectura de EDF/EDF+ y de las anotaciones del hipnograma
+
+# ── modelo provisional (SOMNOAI_MODEL=provisional) ───
+# Estadificador de referencia de código abierto mientras se conecta el endpoint de
+# SageMaker con el stacking del proyecto. Trae sus clasificadores dentro del
+# paquete (no descarga nada al arrancar). Con SOMNOAI_MODEL=mock no hace falta.
+yasa==0.7.0
+lightgbm==4.7.0
+pandas==2.2.2
+scikit-learn==1.5.1
+# numba (dependencia de yasa) se fija junto con llvmlite: las versiones más nuevas
+# de llvmlite no publican wheel para todas las plataformas y pip intenta compilarlo.
+numba==0.62.1
+llvmlite==0.45.1

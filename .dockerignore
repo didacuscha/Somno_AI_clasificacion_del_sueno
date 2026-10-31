@@ -1,0 +1,13 @@
+# El contexto de construcción es la raíz del repositorio (ver backend/Dockerfile):
+# solo entran backend/app, backend/requirements.txt y frontend/.
+.git
+.github
+.gitignore
+docs
+backend/.venv
+backend/data
+backend/tests
+**/__pycache__
+**/.pytest_cache
+*.pyc
+.DS_Store

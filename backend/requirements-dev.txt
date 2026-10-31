@@ -1,0 +1,5 @@
+# Entorno de desarrollo y CI: la API completa + pruebas.
+-r requirements.txt
+
+pytest==9.2.0
+httpx==0.28.1               # cliente HTTP que usa fastapi.testclient

@@ -1,0 +1,43 @@
+# SomnoAI v2 — despliegue con Docker
+#
+#   sh backend/data/demo/download_demos.sh     # las noches demo van por volumen
+#   docker compose up --build
+#   → API y tablero:  http://localhost:8000   (docs interactivas en /docs)
+#   → tablero aparte: http://localhost:8050   (nginx; el puerto abierto en la EC2 en v1)
+#
+# Modelo: SOMNOAI_MODEL=provisional (por defecto) | mock | sagemaker
+#   SOMNOAI_MODEL=mock docker compose up
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: somnoai-api
+    ports:
+      - "8000:8000"
+    environment:
+      SOMNOAI_MODEL: ${SOMNOAI_MODEL:-provisional}
+    volumes:
+      # noches demo + base de datos + señales derivadas (persisten en el host)
+      - ./backend/data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  front:
+    image: nginx:alpine
+    container_name: somnoai-front
+    ports:
+      - "8050:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
