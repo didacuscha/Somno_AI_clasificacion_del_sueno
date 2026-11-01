@@ -14,24 +14,28 @@
 
   const TOKEN_KEY = "maia_token";
   const USER_KEY = "maia_user";
+  const enc = encodeURIComponent;
 
   function authHeaders() {
     const t = sessionStorage.getItem(TOKEN_KEY);
     return t ? { Authorization: "Bearer " + t } : {};
   }
 
-  async function request(path, { method = "GET", body, isForm = false, timeoutMs } = {}) {
+  function unauthorized() {
+    MaiaAPI.clearSession();
+    window.dispatchEvent(new CustomEvent("maia:unauthorized"));
+    return { code: "unauthorized", message: "La sesión expiró. Inicie sesión de nuevo." };
+  }
+
+  async function request(path, { method = "GET", body, timeoutMs } = {}) {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), timeoutMs || CFG.requestTimeoutMs);
     let res;
     try {
       res = await fetch(CFG.apiBase + path, {
         method,
-        headers: {
-          ...(isForm ? {} : body ? { "Content-Type": "application/json" } : {}),
-          ...authHeaders()
-        },
-        body: isForm ? body : body ? JSON.stringify(body) : undefined,
+        headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...authHeaders() },
+        body: body ? JSON.stringify(body) : undefined,
         signal: ctrl.signal
       });
     } catch (e) {
@@ -41,11 +45,7 @@
     } finally {
       clearTimeout(to);
     }
-    if (res.status === 401) {
-      MaiaAPI.clearSession();
-      window.dispatchEvent(new CustomEvent("maia:unauthorized"));
-      throw { code: "unauthorized", message: "La sesión expiró. Inicie sesión de nuevo." };
-    }
+    if (res.status === 401) throw unauthorized();
     return res;
   }
 
@@ -58,6 +58,30 @@
       throw { code: err.code || "http_" + res.status, message: err.message || "Error del servidor (" + res.status + ")." };
     }
     return data;
+  }
+
+  /* subida multipart con avance (fetch no informa el avance de la subida) */
+  function upload(path, fields, onProgress) {
+    return new Promise((resolve, reject) => {
+      const fd = new FormData();
+      Object.entries(fields).forEach(([k, v]) => { if (v) fd.append(k, v); });
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", CFG.apiBase + path);
+      Object.entries(authHeaders()).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+      xhr.timeout = CFG.uploadTimeoutMs;
+      xhr.upload.onprogress = e => { if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total); };
+      xhr.onload = () => {
+        let data = null;
+        try { data = JSON.parse(xhr.responseText); } catch (e) { /* sin cuerpo */ }
+        if (xhr.status === 401) return reject(unauthorized());
+        if (xhr.status >= 200 && xhr.status < 300) return resolve(data);
+        const err = (data && data.error) || {};
+        reject({ code: err.code || "http_" + xhr.status, message: err.message || `Error del servidor (${xhr.status}).` });
+      };
+      xhr.onerror = () => reject({ code: "network", message: "No se pudo contactar la API. ¿Está corriendo el backend?" });
+      xhr.ontimeout = () => reject({ code: "timeout", message: "La subida tardó demasiado. Intente de nuevo." });
+      xhr.send(fd);
+    });
   }
 
   /* descarga un CSV autenticado (un <a href> no puede mandar el token) */
@@ -73,6 +97,8 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+
+  const rec = id => "/records/" + enc(id);
 
   window.MaiaAPI = {
     isMock: useMock,
@@ -95,67 +121,63 @@
       return out.user;
     },
 
-    /* ── reglas del modelo y noches disponibles ── */
+    /* ── reglas del modelo y catálogo de noches ── */
     getConfig: () => useMock() ? MaiaMock.getConfig() : http("/config"),
-    async listDemos() {
-      const out = useMock() ? await MaiaMock.listDemos() : await http("/demos");
-      return out.demos;
-    },
-    async lookupNight(fileName) {
-      const out = useMock() ? await MaiaMock.lookupNight(fileName)
-        : await http("/dataset/lookup?file_name=" + encodeURIComponent(fileName));
-      return out.night;
-    },
+    listCatalog: (refresh = false) => useMock() ? MaiaMock.listCatalog()
+      : http("/catalog" + (refresh ? "?refresh=true" : ""), { timeoutMs: 120000 }),
+
+    /* ── PSG propio: se sube primero y el servidor responde con sus canales ── */
+    uploadPsg: (file, hypnogram, onProgress) => useMock() ? MaiaMock.uploadPsg(file, hypnogram)
+      : upload("/uploads", { file, hypnogram }, onProgress),
+    attachHypnogram: (id, file) => useMock() ? MaiaMock.attachHypnogram(id, file)
+      : upload(`/uploads/${enc(id)}/hypnogram`, { file }),
+    removeHypnogram: id => useMock() ? MaiaMock.removeHypnogram(id)
+      : http(`/uploads/${enc(id)}/hypnogram`, { method: "DELETE" }),
+    deleteUpload: id => useMock() ? MaiaMock.deleteUpload(id) : http(`/uploads/${enc(id)}`, { method: "DELETE" }),
 
     /* ── análisis (asíncronos: responden «en cola» y se consulta el registro) ── */
-    createAnalysis({ file, hypnogram, channels, channelMap, windowMode, startClock, endClock, lightsOff }) {
-      if (useMock()) return MaiaMock.createAnalysis(arguments[0]);
-      const fd = new FormData();
-      fd.append("file", file);
-      if (hypnogram) fd.append("hypnogram", hypnogram);
-      fd.append("channels", channels.join(","));
-      if (channelMap && Object.keys(channelMap).length) fd.append("channel_map", JSON.stringify(channelMap));
-      if (windowMode) fd.append("window_mode", windowMode);
-      if (startClock) fd.append("start_clock", startClock);
-      if (endClock) fd.append("end_clock", endClock);
-      fd.append("lights_off", lightsOff || "none");
-      return http("/analyses", { method: "POST", body: fd, isForm: true, timeoutMs: CFG.uploadTimeoutMs });
+    createAnalysis({ source, channels, channelMap, windowMode, startClock, endClock, lightsOff }) {
+      const body = {
+        source, channels, channel_map: channelMap && Object.keys(channelMap).length ? channelMap : null,
+        window_mode: windowMode || null, start_clock: startClock || null, end_clock: endClock || null,
+        lights_off: lightsOff || "none"
+      };
+      return useMock() ? MaiaMock.createAnalysis(body) : http("/analyses", { method: "POST", body });
     },
-    createDemoAnalysis({ demoId, channels, channelMap, windowMode, startClock, endClock, lightsOff }) {
-      if (useMock()) return MaiaMock.createDemoAnalysis(arguments[0]);
-      return http("/analyses/demo", { method: "POST", body: {
-        demo_id: demoId, channels, channel_map: channelMap || null, window_mode: windowMode || null,
-        start_clock: startClock || null, end_clock: endClock || null, lights_off: lightsOff || "none" } });
-    },
+    retry: id => useMock() ? MaiaMock.retry(id) : http(rec(id) + "/retry", { method: "POST" }),
 
     /* ── registros ── */
     async listRecords() {
       const out = useMock() ? await MaiaMock.listRecords() : await http("/records");
       return out.records;
     },
-    getRecord: id => useMock() ? MaiaMock.getRecord(id) : http("/records/" + encodeURIComponent(id)),
-    deleteRecord: id => useMock() ? MaiaMock.deleteRecord(id)
-      : http("/records/" + encodeURIComponent(id), { method: "DELETE" }),
+    getRecord: id => useMock() ? MaiaMock.getRecord(id) : http(rec(id)),
+    deleteRecord: id => useMock() ? MaiaMock.deleteRecord(id) : http(rec(id), { method: "DELETE" }),
 
     /* ── señal por ventana (envolvente mín-máx, nunca la señal cruda) ── */
     getSignal(id, startS, durationS, points, channels) {
       if (useMock()) return MaiaMock.getSignal(id, startS, durationS, points, channels);
-      const q = `?start_s=${startS}&duration_s=${durationS}&points=${points}&channels=${channels.join(",")}`;
-      return http("/records/" + encodeURIComponent(id) + "/signal" + q);
+      return http(rec(id) + `/signal?start_s=${startS}&duration_s=${durationS}&points=${points}&channels=${channels.join(",")}`);
+    },
+    /* ── evidencia espectral de una época ── */
+    getEvidence(id, epoch, channel) {
+      if (useMock()) return MaiaMock.getEvidence(id, epoch, channel);
+      return http(rec(id) + `/epochs/${epoch}/evidence` + (channel ? `?channel=${enc(channel)}` : ""));
     },
 
     /* ── revisión del especialista ── */
-    changeEpochs(id, changes) {
-      if (useMock()) return MaiaMock.changeEpochs(id, changes);
-      return http("/records/" + encodeURIComponent(id) + "/epochs", { method: "PATCH", body: { changes } });
+    changeEpochs: (id, changes) => useMock() ? MaiaMock.changeEpochs(id, changes)
+      : http(rec(id) + "/epochs", { method: "PATCH", body: { changes } }),
+    getChanges: id => useMock() ? MaiaMock.getChanges(id) : http(rec(id) + "/changes"),
+    reviewAction: (id, action, expectedCorrected) => {
+      const body = { action, expected_corrected: expectedCorrected ?? null };
+      return useMock() ? MaiaMock.reviewAction(id, body) : http(rec(id) + "/review", { method: "POST", body });
     },
-    reviewAction(id, action) {
-      if (useMock()) return MaiaMock.reviewAction(id, action);
-      return http("/records/" + encodeURIComponent(id) + "/review", { method: "POST", body: { action } });
-    },
+    addNote: (id, text) => useMock() ? MaiaMock.addNote(id, text)
+      : http(rec(id) + "/notes", { method: "POST", body: { text } }),
 
     /* ── exportación ── */
-    exportRecord: id => download("/records/" + encodeURIComponent(id) + "/export.csv", "hipnograma.csv"),
+    exportRecord: id => download(rec(id) + "/export.csv", "hipnograma.csv"),
     exportCorrections: () => download("/corrections/export.csv", "correcciones_somnoai.csv")
   };
 })();

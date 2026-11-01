@@ -1,21 +1,20 @@
-"""Modelo simulado: probabilidades sintéticas y deterministas.
+"""Doble de pruebas del modelo: probabilidades sintéticas y deterministas.
 
-Para desarrollar la interfaz y correr las pruebas sin ningún modelo cargado. Si
-hay hipnograma de referencia parte de él y le agrega los errores típicos del
-sistema (N1 confundido con N2, W y REM, como en la Fig. 5 del informe); si no,
-inventa una noche plausible. Mismo archivo y mismos canales → mismo resultado.
-Las combinaciones más pobres (Pz-Oz solo) se equivocan más, en proporción a su
-MF1 de test.
+Para correr las pruebas y la CI sin ningún modelo cargado (SOMNOAI_MODEL=mock). No
+mira la señal más allá de usarla como semilla: inventa una noche plausible
+(vigilia, ciclos de ~90 min y vigilia otra vez) y le agrega los errores típicos del
+sistema (N1 confundido con N2, W y REM, como en la Fig. 5 del informe). Mismas
+épocas → mismo resultado. Las combinaciones más pobres (Pz-Oz solo) se equivocan
+más, en proporción a su MF1 de test.
 """
 import hashlib
 import os
 import time
-from pathlib import Path
 
 import numpy as np
 
 from .. import config
-from .client import StagingRequest, StagingResult
+from .adapter import ModelInfo, StagingRequest, StagingResult
 
 # A qué estadio se va cada error, por estadio real (filas W, N1, N2, N3, REM).
 CONFUSION = np.array([
@@ -29,7 +28,7 @@ ERROR_RATE = np.array([0.06, 0.45, 0.10, 0.18, 0.10])      # con los cuatro cana
 DELAY_S = float(os.environ.get("SOMNOAI_MOCK_DELAY", "2"))  # para que se vea el estado «en proceso»
 
 
-def _synthetic_night(rng: np.random.Generator, n: int, lights_off: int | None) -> np.ndarray:
+def synthetic_night(rng: np.random.Generator, n: int, lights_off: int | None) -> np.ndarray:
     """Vigilia, ciclos de ~90 min (N3 al inicio, REM al final) y vigilia otra vez."""
     stages = np.zeros(n, dtype=int)
     onset = max(0, (lights_off if lights_off is not None else 60) + int(rng.integers(20, 60)))
@@ -46,28 +45,19 @@ def _synthetic_night(rng: np.random.Generator, n: int, lights_off: int | None) -
     return stages
 
 
-class MockClient:
-    kind = "mock"
+class MockAdapter:
+    def info(self) -> ModelInfo:
+        return ModelInfo(kind="mock", name="Modelo simulado (pruebas)", version="simulado-2.0")
 
-    def version(self) -> str:
-        return "simulado-1.0"
-
-    def stage(self, req: StagingRequest) -> StagingResult:
+    def predict(self, req: StagingRequest) -> StagingResult:
         t0 = time.perf_counter()
-        key = f"{Path(req.psg_path).name}|{req.combination}|{req.start_epoch}|{req.n_epochs}"
-        rng = np.random.default_rng(int(hashlib.sha256(key.encode()).hexdigest()[:8], 16))
+        first = req.epochs[req.slots[0]]
+        key = hashlib.sha256(f"{req.combination}|{req.start_epoch}|{req.n_epochs}".encode()
+                             + first[:2].tobytes()).hexdigest()
+        rng = np.random.default_rng(int(key[:8], 16))
         n = req.n_epochs
-
-        if req.reference is not None:
-            truth = np.asarray(req.reference, dtype=int).copy()
-            for i in range(n):                       # épocas sin estadio: se arrastra el anterior
-                if truth[i] < 0:
-                    truth[i] = truth[i - 1] if i else 0
-        else:
-            lo = None
-            if req.lights_off_s is not None:
-                lo = int(req.lights_off_s // req.epoch_s) - req.start_epoch
-            truth = _synthetic_night(rng, n, lo)
+        lo = int(req.lights_off_s // req.epoch_s) - req.start_epoch if req.lights_off_s is not None else None
+        truth = synthetic_night(rng, n, lo)
 
         weaker = (1 - config.EXPECTED[req.combination]["test_mf1"]) / (1 - 0.784)
         transition = np.zeros(n, dtype=bool)
@@ -96,6 +86,6 @@ class MockClient:
 
         if DELAY_S:
             time.sleep(DELAY_S)
-        return StagingResult(probs=probs, model_version=self.version(),
+        return StagingResult(stages=probs.argmax(axis=1), probs=probs,
                              notes=["Resultados simulados: no provienen de ningún modelo entrenado."],
                              timings={"model_s": round(time.perf_counter() - t0, 2)})

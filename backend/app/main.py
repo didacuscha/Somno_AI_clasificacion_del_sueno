@@ -1,7 +1,7 @@
 """API de SomnoAI v2 — implementa docs/API_CONTRACT.md.
 
 Arranque:  ./run.sh   (equivale a: uvicorn app.main:app --port 8000)
-Con la base vacía y las noches demo en data/demo/, lanza unos análisis de muestra.
+Con la base vacía y las noches demo en el catálogo, lanza unos análisis de muestra.
 La API también sirve el tablero (frontend/) en http://localhost:8000/.
 """
 import base64
@@ -12,23 +12,21 @@ import io
 import json
 import logging
 import os
-import re
-import shutil
 import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import channels as ch
-from . import config, dataset, db, jobs, signals
-from .model.client import get_client
-from .pipeline import edf_io, review
+from . import catalog, channels as ch
+from . import config, db, jobs, signals, uploads
+from .model.adapter import get_adapter
+from .pipeline import edf_io, review, spectral
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("somnoai.api")
@@ -42,16 +40,15 @@ def _err(status: int, code: str, message: str) -> HTTPException:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
-    if n := db.mark_interrupted():
-        log.warning("%d análisis interrumpidos por el reinicio quedaron como fallidos", n)
-    log.info("Modelo activo: %s (%s)", get_client().version(), get_client().kind)
+    if n := jobs.recover_interrupted():
+        log.warning("%d análisis interrumpidos por el reinicio quedaron como fallidos (se pueden reintentar)", n)
+    if n := uploads.purge_stale():
+        log.info("%d cargas sin analizar borradas", n)
+    info = get_adapter().info()
+    log.info("Modelo activo: %s · %s (%s)", info.name, info.version, info.kind)
+    log.info("Catálogo de noches: %s", catalog.get_catalog().source["location"])
     if config.SEED_DEMOS and db.count() == 0:
-        for seed in config.SEED_ANALYSES:
-            if dataset.demo(seed["demo_id"]):
-                try:
-                    _start_demo(DemoBody(**seed), created_by="Sistema")
-                except Exception as e:  # una semilla rota no debe tumbar la API
-                    log.warning("No se pudo sembrar %s: %s", seed, e)
+        jobs.seed()
     log.info("SomnoAI API lista · %d registros en la base", db.count())
     yield
 
@@ -69,8 +66,9 @@ async def http_exc(_, exc: HTTPException):
 @app.get(f"{API}/health")
 def health():
     """Sin auth: para el healthcheck de Docker Compose y monitoreo."""
-    client = get_client()
-    return {"status": "ok", "records": db.count(), "model": {"kind": client.kind, "version": client.version()}}
+    info = get_adapter().info()
+    return {"status": "ok", "records": db.count(),
+            "model": {"kind": info.kind, "name": info.name, "version": info.version}}
 
 
 # ── sesión ────────────────────────────────────────────────────────────
@@ -115,175 +113,160 @@ def auth(authorization: str = Header(default="")) -> dict:
     return _public_user(username)
 
 
-# ── configuración y demos ─────────────────────────────────────────────
+# ── configuración y catálogo ──────────────────────────────────────────
 @app.get(f"{API}/config")
 def get_config(_: dict = Depends(auth)):
-    """Reglas del modelo y catálogo de canales: el tablero no las duplica."""
-    client = get_client()
+    """Reglas del modelo (las reporta el adaptador) y catálogo de canales: el tablero no las duplica."""
+    info = get_adapter().info()
     return {
         "stages": config.STAGES,
         "epoch_s": config.EPOCH_S,
         "channels": config.CHANNELS,
         "channel_aliases": config.CHANNEL_ALIASES,
-        "confidence_threshold": config.CONFIDENCE_THRESHOLD,
-        "night_review_fraction": config.NIGHT_REVIEW_FRACTION,
+        "channel_kinds": config.CHANNEL_KINDS,
+        "confidence_threshold": info.threshold,
+        "night_review_fraction": info.night_review_fraction,
         "mf1_goal": config.MF1_GOAL,
         "window_margin_min": config.WINDOW_MARGIN_EPOCHS * config.EPOCH_S // 60,
         "min_window_min": config.MIN_WINDOW_EPOCHS * config.EPOCH_S // 60,
-        "expected": config.EXPECTED,
+        "expected": info.expected,
+        "expected_source": info.expected_source,
         "max_upload_mb": config.MAX_UPLOAD_MB,
-        "model": {"kind": client.kind, "version": client.version()},
+        "max_note_chars": config.MAX_NOTE_CHARS,
+        "model": info.public(),
+        "bands": config.SPECTRAL_BANDS,
+        "steps": [{"key": k, "label": label} for k, label in jobs.STEPS],
+        "catalog": catalog.get_catalog().source,
     }
 
 
-@app.get(f"{API}/demos")
-def list_demos(_: dict = Depends(auth)):
-    out = []
-    for d in dataset.demos():
-        h = edf_io.read_header(str(config.DEMO_DIR / d["psg"]))
-        out.append({**d, "header": {k: h[k] for k in ("labels", "fs", "start_clock_s", "duration_s")},
-                    "detected": ch.detect(h["labels"])})
-    return {"demos": out}
+@app.get(f"{API}/catalog")
+def list_catalog(refresh: bool = False, _: dict = Depends(auth)):
+    """Noches del catálogo (S3 o carpeta local) con sus canales, sin descargarlas."""
+    cat = catalog.get_catalog()
+    try:
+        nights = cat.nights(refresh=refresh)
+    except catalog.CatalogError as e:
+        raise _err(502, "catalog_unavailable", str(e))
+    return {"source": cat.source, "nights": [catalog.public(n) for n in nights]}
 
 
-@app.get(f"{API}/dataset/lookup")
-def dataset_lookup(file_name: str, _: dict = Depends(auth)):
-    """Datos de una noche de Sleep-EDFx a partir del nombre del archivo (o null)."""
-    return {"night": dataset.lookup(file_name)}
+# ── cargas propias (PSG .edf) ─────────────────────────────────────────
+def _upload_error(e: Exception) -> HTTPException:
+    if isinstance(e, uploads.UploadNotFound):
+        return _err(404, "not_found", "La carga no existe o ya se borró: suba el archivo de nuevo.")
+    return _err(422, "invalid_file", str(e))
+
+
+@app.post(f"{API}/uploads", status_code=201)
+def create_upload(file: UploadFile, hypnogram: UploadFile | None = File(None), user: dict = Depends(auth)):
+    """Guarda y valida un PSG: responde con los canales encontrados (o con lo que está mal)."""
+    try:
+        return uploads.create(file.file, file.filename, hypnogram.file if hypnogram else None,
+                              hypnogram.filename if hypnogram else None, user["name"])
+    except (edf_io.InvalidFile, uploads.UploadNotFound) as e:
+        raise _upload_error(e)
+
+
+@app.get(f"{API}/uploads/{{upload_id}}")
+def get_upload(upload_id: str, _: dict = Depends(auth)):
+    try:
+        return uploads.describe(upload_id)
+    except (edf_io.InvalidFile, uploads.UploadNotFound) as e:
+        raise _upload_error(e)
+
+
+@app.post(f"{API}/uploads/{{upload_id}}/hypnogram")
+def attach_hypnogram(upload_id: str, file: UploadFile, _: dict = Depends(auth)):
+    try:
+        return uploads.attach_hypnogram(upload_id, file.file, file.filename)
+    except (edf_io.InvalidFile, uploads.UploadNotFound) as e:
+        raise _upload_error(e)
+
+
+@app.delete(f"{API}/uploads/{{upload_id}}/hypnogram")
+def remove_hypnogram(upload_id: str, _: dict = Depends(auth)):
+    try:
+        return uploads.remove_hypnogram(upload_id)
+    except (edf_io.InvalidFile, uploads.UploadNotFound) as e:
+        raise _upload_error(e)
+
+
+@app.delete(f"{API}/uploads/{{upload_id}}")
+def delete_upload(upload_id: str, _: dict = Depends(auth)):
+    if db.upload_in_use(upload_id):
+        raise _err(409, "in_use", "Esta carga pertenece a un análisis; se borra al borrar el registro.")
+    uploads.delete(upload_id)
+    return {"deleted": upload_id}
 
 
 # ── análisis ──────────────────────────────────────────────────────────
-def _lights_off(value: str | None, night: dict | None) -> tuple[str | None, str | None]:
-    """None → la del índice de Sleep-EDFx si la hay; "none" → sin apagado de luces."""
-    if value is None:
-        return (night["lights_off"], "dataset-index") if night else (None, None)
-    if value.strip().lower() in ("none", "-"):
-        return None, None
-    # el tablero prellena la del índice: si llega sin cambios, se registra con ese origen
-    if night and value.strip() == night["lights_off"]:
-        return value.strip(), "dataset-index"
-    return value.strip(), "manual"
+class SourceRef(BaseModel):
+    type: str                          # catalog | upload
+    id: str
 
 
-def _parse_channels(value) -> list[str]:
-    items = value if isinstance(value, list) else re.split(r"[,\s]+", value or "")
-    return [s for s in items if s]
+class AnalysisBody(BaseModel):
+    source: SourceRef
+    channels: list[str]
+    channel_map: dict[str, str] | None = None
+    window_mode: str | None = None     # reference | range | full
+    start_clock: str | None = None
+    end_clock: str | None = None
+    lights_off: str | None = None      # None → índice de Sleep-EDFx; "none" → sin apagado de luces
 
 
-def _save_upload(upload: UploadFile, dest: Path, limit_bytes: int) -> int:
-    size = 0
-    with open(dest, "wb") as out:
-        while chunk := upload.file.read(1 << 20):
-            size += len(chunk)
-            if size > limit_bytes:
-                raise _err(413, "too_large", f"El archivo supera el límite de {config.MAX_UPLOAD_MB} MB.")
-            out.write(chunk)
-    return size
+def _job_error(e: Exception) -> HTTPException:
+    if isinstance(e, ch.InvalidSelection):
+        return _err(422, "invalid_channels", str(e))
+    if isinstance(e, catalog.NightNotFound):
+        return _err(404, "not_found", str(e))
+    if isinstance(e, catalog.CatalogError):
+        return _err(502, "catalog_unavailable", str(e))
+    if isinstance(e, uploads.UploadNotFound):
+        return _err(404, "not_found", "La carga no existe o ya se borró: suba el archivo de nuevo.")
+    return _err(422, "invalid_file", str(e))
+
+
+_JOB_ERRORS = (edf_io.InvalidFile, ch.InvalidSelection, catalog.CatalogError, uploads.UploadNotFound)
+
+
+def start_analysis(body: AnalysisBody, created_by: str) -> dict:
+    spec = body.model_dump()
+    try:
+        job = jobs.prepare(uuid.uuid4().hex[:12], spec, created_by)
+    except _JOB_ERRORS as e:
+        raise _job_error(e)
+    return jobs.create(job)
 
 
 @app.post(f"{API}/analyses", status_code=202)
-def create_analysis(file: UploadFile, hypnogram: UploadFile | None = File(None),
-                    channels: str = Form(...), channel_map: str | None = Form(None),
-                    window_mode: str | None = Form(None), start_clock: str | None = Form(None),
-                    end_clock: str | None = Form(None), lights_off: str | None = Form(None),
-                    user: dict = Depends(auth)):
-    name = Path(file.filename or "registro.edf").name
-    if not re.search(r"\.(edf|zip)$", name, re.I):
-        raise _err(422, "invalid_file", "Formato no aceptado: cargue un .edf o un .zip.")
-    if hypnogram is not None and not re.search(r"\.edf$", hypnogram.filename or "", re.I):
-        raise _err(422, "invalid_file", "El hipnograma debe ser un archivo .edf (EDF+ con anotaciones).")
-    try:
-        cmap = json.loads(channel_map) if channel_map else None
-    except json.JSONDecodeError:
-        raise _err(422, "invalid_channels", "channel_map debe ser un JSON {modalidad: etiqueta}.")
-
-    rid = uuid.uuid4().hex[:12]
-    updir = config.UPLOAD_DIR / rid
-    updir.mkdir(parents=True)
-    try:
-        limit = config.MAX_UPLOAD_MB * 1048576
-        size = _save_upload(file, updir / name, limit)
-        if name.lower().endswith(".zip"):
-            psg_path, hyp_path, psg_name = edf_io.extract_zip(str(updir / name), str(updir / "zip"))
-        else:
-            psg_path, hyp_path, psg_name = str(updir / name), None, name
-        if hypnogram is not None:
-            hyp_path = str(updir / ("ref-" + Path(hypnogram.filename).name))
-            _save_upload(hypnogram, Path(hyp_path), limit)
-        night = dataset.lookup(psg_name)
-        lo_clock, lo_source = _lights_off(lights_off, night)
-        job = jobs.prepare(
-            record_id=rid, psg_path=psg_path, hyp_path=hyp_path, file_name=psg_name,
-            size_mb=size / 1048576, source="upload", selected=_parse_channels(channels),
-            channel_map=cmap, window_mode=window_mode, start_clock=start_clock, end_clock=end_clock,
-            lights_off_clock=lo_clock, lights_off_source=lo_source, dataset=night,
-            created_by=user["name"], cleanup_dir=str(updir))
-    except edf_io.InvalidFile as e:
-        shutil.rmtree(updir, ignore_errors=True)
-        raise _err(422, "invalid_file", str(e))
-    except ch.InvalidSelection as e:
-        shutil.rmtree(updir, ignore_errors=True)
-        raise _err(422, "invalid_channels", str(e))
-    except BaseException:
-        shutil.rmtree(updir, ignore_errors=True)
-        raise
-    return jobs.create(job)
-
-
-class DemoBody(BaseModel):
-    demo_id: str
-    channels: list[str]
-    channel_map: dict[str, str] | None = None
-    window_mode: str | None = None
-    start_clock: str | None = None
-    end_clock: str | None = None
-    lights_off: str | None = None       # None → índice de Sleep-EDFx; "none" → sin apagado de luces
-
-
-def _start_demo(body: DemoBody, created_by: str) -> dict:
-    demo = dataset.demo(body.demo_id)
-    if not demo:
-        raise _err(404, "not_found", "Registro demo desconocido o sin sus archivos en el servidor.")
-    hyp = config.DEMO_DIR / demo["hypnogram"]
-    lo_clock, lo_source = _lights_off(body.lights_off, demo)
-    try:
-        job = jobs.prepare(
-            record_id=uuid.uuid4().hex[:12], psg_path=str(config.DEMO_DIR / demo["psg"]),
-            hyp_path=str(hyp) if hyp.exists() else None, file_name=demo["psg"],
-            size_mb=(config.DEMO_DIR / demo["psg"]).stat().st_size / 1048576, source="demo",
-            selected=_parse_channels(body.channels), channel_map=body.channel_map,
-            window_mode=body.window_mode, start_clock=body.start_clock, end_clock=body.end_clock,
-            lights_off_clock=lo_clock, lights_off_source=lo_source, dataset=dataset.lookup(demo["psg"]),
-            created_by=created_by)
-    except edf_io.InvalidFile as e:
-        raise _err(422, "invalid_file", str(e))
-    except ch.InvalidSelection as e:
-        raise _err(422, "invalid_channels", str(e))
-    return jobs.create(job)
-
-
-@app.post(f"{API}/analyses/demo", status_code=202)
-def create_demo_analysis(body: DemoBody, user: dict = Depends(auth)):
-    return _start_demo(body, created_by=user["name"])
+def create_analysis(body: AnalysisBody, user: dict = Depends(auth)):
+    return start_analysis(body, user["name"])
 
 
 # ── registros ─────────────────────────────────────────────────────────
 def _summary(row: dict) -> dict:
     return {**row["summary"], "status": row["status"], "progress": row["progress"],
-            "error": row["error"], "review": row["review"]}
+            "error": row["error"], "review": row["review"], "attempts": row.get("attempts", 1)}
 
 
-def _get_done(record_id: str) -> dict:
+def _get(record_id: str) -> dict:
     row = db.get(record_id)
     if not row:
         raise _err(404, "not_found", "El registro no existe.")
+    return row
+
+
+def _get_done(record_id: str) -> dict:
+    row = _get(record_id)
     if row["status"] != "done":
         raise _err(409, "not_ready", "El análisis todavía no termina.")
     return row
 
 
 def _dynamic(row: dict) -> dict:
-    """Lo que depende de las correcciones: se calcula en cada lectura."""
+    """Lo que depende de las decisiones del revisor: se calcula en cada lectura."""
     detail, rid = row["detail"], row["id"]
     corr = db.corrections(rid)
     der = review.derived(detail, {e: c["stage"] for e, c in corr.items()})
@@ -293,7 +276,8 @@ def _dynamic(row: dict) -> dict:
         "agreement_final": der["agreement_final"],
         "corrections": list(corr.values()),
         "review": row["review"],
-        "history": db.history(rid, 100),
+        "history": db.history(rid, 200),
+        "notes": db.notes(rid),
     }
 
 
@@ -304,31 +288,45 @@ def list_records(_: dict = Depends(auth)):
 
 @app.get(f"{API}/records/{{record_id}}")
 def get_record(record_id: str, _: dict = Depends(auth)):
-    row = db.get(record_id)
-    if not row:
-        raise _err(404, "not_found", "El registro no existe.")
+    row = _get(record_id)
     if row["status"] != "done":
         return _summary(row)
-    d = {**row["detail"], "status": "done"}
+    d = {**row["detail"], "status": "done", "progress": row["progress"], "attempts": row.get("attempts", 1)}
     dyn = _dynamic(row)
     d["epochs"]["final"] = dyn["final"]
     d["metrics"]["final"] = dyn["metrics_final"]
     if d.get("agreement"):
         d["agreement"]["final"] = dyn["agreement_final"]
-    d.update(corrections=dyn["corrections"], review=dyn["review"], history=dyn["history"])
+    d.update(corrections=dyn["corrections"], review=dyn["review"], history=dyn["history"], notes=dyn["notes"])
     return d
 
 
 @app.delete(f"{API}/records/{{record_id}}")
 def delete_record(record_id: str, _: dict = Depends(auth)):
-    row = db.get(record_id)
-    if not row:
-        raise _err(404, "not_found", "El registro no existe.")
+    row = _get(record_id)
     if row["status"] in ("queued", "running"):
         raise _err(409, "busy", "El análisis está en curso: espere a que termine para borrarlo.")
     db.delete(record_id)
     signals.remove(row["signal_dir"])
+    src = (row.get("spec") or {}).get("source") or {}
+    if src.get("type") == "upload" and not db.upload_in_use(src.get("id", "")):
+        uploads.delete(src.get("id", ""))
     return {"deleted": record_id}
+
+
+@app.post(f"{API}/records/{{record_id}}/retry", status_code=202)
+def retry_record(record_id: str, user: dict = Depends(auth)):
+    """Vuelve a lanzar un análisis fallido con la misma configuración."""
+    row = _get(record_id)
+    if row["status"] != "failed":
+        raise _err(409, "not_failed", "Solo se puede reintentar un análisis que falló.")
+    if not row.get("spec"):
+        raise _err(409, "no_spec", "Este análisis es de una versión anterior y no guardó su configuración: "
+                                   "lance uno nuevo desde «Analizar nuevo».")
+    try:
+        return jobs.retry(record_id, user["name"])
+    except _JOB_ERRORS as e:
+        raise _job_error(e)
 
 
 @app.get(f"{API}/records/{{record_id}}/signal")
@@ -341,7 +339,7 @@ def get_signal(record_id: str, start_s: float, duration_s: float, points: int = 
     if not (1 <= points <= 4000) or duration_s <= 0:
         raise _err(422, "out_of_range", "Parámetros de ventana inválidos.")
     stored = signals.meta(sig_dir)["channels"]
-    wanted = [c for c in _parse_channels(channels) if c in stored] or stored
+    wanted = [c for c in channels.replace(" ", "").split(",") if c in stored] or stored
     window_s = row["detail"]["night"]["n_epochs"] * config.EPOCH_S
     start_s = max(0.0, min(start_s, window_s))
     duration_s = min(duration_s, window_s - start_s) or 1.0
@@ -350,6 +348,56 @@ def get_signal(record_id: str, start_s: float, duration_s: float, points: int = 
         mins, maxs = signals.envelope(sig_dir, slot, start_s, duration_s, points)
         traces[slot] = {"min": mins, "max": maxs}
     return {"start_s": start_s, "duration_s": duration_s, "points": points, "unit": "µV", "traces": traces}
+
+
+# ── evidencia de la señal (US-11) ─────────────────────────────────────
+_BANDS_KEY = hashlib.sha1(json.dumps(config.SPECTRAL_BANDS, sort_keys=True).encode()).hexdigest()[:8]
+
+
+@app.get(f"{API}/records/{{record_id}}/epochs/{{epoch}}/evidence")
+def epoch_evidence(record_id: str, epoch: int, channel: str | None = None, _: dict = Depends(auth)):
+    """Potencia relativa por banda del EEG en la época, con el perfil típico de cada
+    estadio en esta misma noche para comparar."""
+    row = _get_done(record_id)
+    d = row["detail"]
+    n, EP = d["night"]["n_epochs"], d["night"]["epoch_s"]
+    if not 0 <= epoch < n:
+        raise _err(422, "out_of_range", f"La época {epoch} no existe (hay {n}).")
+    sig_dir = Path(row["signal_dir"] or "")
+    if not (sig_dir / "meta.json").exists():
+        raise _err(404, "not_found", "La señal de este registro no está disponible.")
+    stored = signals.meta(sig_dir)["channels"]
+    eeg = [s for s in stored if config.CHANNELS.get(s, {}).get("kind") == "eeg"]
+    if not eeg:
+        raise _err(404, "no_eeg", "Este registro no tiene un EEG guardado para calcular la evidencia.")
+    channel = channel or next((s for s in d["channels"]["selected"] if s in eeg), eeg[0])
+    if channel not in eeg:
+        raise _err(422, "invalid_channel", f"Elija un EEG de este registro: {', '.join(eeg)}.")
+    powers = signals.cached(sig_dir, f"bands_{channel}_{_BANDS_KEY}",
+                            lambda: spectral.band_powers(*signals.epochs(sig_dir, channel, n, EP)))
+    corr = {e: c["stage"] for e, c in db.corrections(record_id).items()}
+    ep = d["epochs"]
+    final = review.final_stages(ep["stage"], corr)
+    thr = d["model"]["threshold"]
+    trusted = [i in corr or ep["confidence"][i] >= thr for i in range(len(final))]
+    typical = spectral.typical_profiles(powers, final[:len(powers)], trusted[:len(powers)])
+    row_i = powers[epoch] if epoch < len(powers) else [float("nan")] * len(config.SPECTRAL_BANDS)
+    val = lambda v: None if v is None or v != v else round(float(v), 4)  # noqa: E731
+    cands = [ep["stage"][epoch], ep["second"][epoch]]
+    near = spectral.closest(row_i, typical, cands)
+    return {
+        "epoch": epoch,
+        "channel": channel,
+        "channel_name": config.CHANNELS[channel]["name"],
+        "file_label": d["channels"]["available"].get(channel),
+        "channels": eeg,
+        "fs": signals.meta(sig_dir)["sfreq"],
+        "bands": [{**b, "value": val(row_i[j])} for j, b in enumerate(config.SPECTRAL_BANDS)],
+        "typical": {config.STAGES[k]: v for k, v in typical.items()},
+        "candidates": cands,
+        "closest": near,               # candidato con el perfil típico más parecido (o None)
+        "method": "Potencia relativa del EEG por banda (Welch, ventanas de 4 s) entre 0,5 y 30 Hz.",
+    }
 
 
 # ── revisión del especialista ─────────────────────────────────────────
@@ -366,13 +414,19 @@ def _review_payload(row: dict) -> dict:
     dyn = _dynamic(row)
     return {"final": dyn["final"], "metrics_final": dyn["metrics_final"],
             "agreement_final": dyn["agreement_final"], "corrections": dyn["corrections"],
-            "review": dyn["review"], "history": dyn["history"]}
+            "review": dyn["review"], "history": dyn["history"], "notes": dyn["notes"]}
+
+
+def _finalized(row: dict) -> dict:
+    rv = row["review"] or {}
+    return {"by": rv.get("finalized_by"), "at": rv.get("finalized_at")} if rv.get("finalized_by") else {}
 
 
 @app.patch(f"{API}/records/{{record_id}}/epochs")
 def change_epochs(record_id: str, body: EpochsBody, user: dict = Depends(auth)):
+    """Confirmar (mismo estadio que el modelo), corregir o volver a la predicción del modelo."""
     row = _get_done(record_id)
-    if (row["review"] or {}).get("status") == "signed_off":
+    if (row["review"] or {}).get("status") == "finalized":
         raise _err(409, "review_locked", "La revisión está finalizada. Reábrala para hacer cambios.")
     detail = row["detail"]
     n = detail["night"]["n_epochs"]
@@ -384,31 +438,72 @@ def change_epochs(record_id: str, body: EpochsBody, user: dict = Depends(auth)):
             raise _err(422, "out_of_range", f"La época {c.epoch} no existe (hay {n}).")
         if c.stage is not None and not 0 <= c.stage < len(config.STAGES):
             raise _err(422, "invalid_stage", "Estadio inválido: use 0=W, 1=N1, 2=N2, 3=N3, 4=REM.")
-        changes.append((c.epoch, c.stage, current.get(c.epoch, pred[c.epoch])))
+        if c.stage is None and c.epoch not in current:
+            continue                    # ya estaba como la predijo el modelo
+        changes.append((c.epoch, c.stage, current.get(c.epoch, pred[c.epoch]), pred[c.epoch]))
+        if c.stage is None:
+            current.pop(c.epoch, None)
+        else:
+            current[c.epoch] = c.stage
     if changes:
         db.apply_changes(record_id, changes, user["name"])
-    corr = {e: c["stage"] for e, c in db.corrections(record_id).items()}
-    db.set_review(record_id, review.state(detail["epochs"], corr, {},
-                                          detail["model"]["night_review_fraction"]))
+    db.set_review(record_id, review.state(detail["epochs"], current, {}, detail["model"]["night_review_fraction"]))
     return _review_payload(db.get(record_id))
 
 
+@app.get(f"{API}/records/{{record_id}}/changes")
+def review_changes(record_id: str, _: dict = Depends(auth)):
+    """Resumen antes de finalizar (US-14): confirmadas, corregidas y la lista de cambios."""
+    row = _get_done(record_id)
+    return {**review.changes(row["detail"], db.corrections(record_id)), "review": row["review"]}
+
+
 class ReviewBody(BaseModel):
-    action: str                        # sign_off | reopen
+    action: str                        # finalize | reopen
+    expected_corrected: int | None = None   # cambios que vio el revisor en el resumen
 
 
 @app.post(f"{API}/records/{{record_id}}/review")
 def review_action(record_id: str, body: ReviewBody, user: dict = Depends(auth)):
     row = _get_done(record_id)
-    if body.action not in ("sign_off", "reopen"):
-        raise _err(422, "invalid_action", "Acción desconocida: use sign_off o reopen.")
-    detail = row["detail"]
-    signed = {"by": user["name"], "at": db.now()} if body.action == "sign_off" else {}
-    corr = {e: c["stage"] for e, c in db.corrections(record_id).items()}
-    db.set_review(record_id, review.state(detail["epochs"], corr, signed,
-                                          detail["model"]["night_review_fraction"]))
-    db.log_action(record_id, user["name"], body.action)
+    if body.action not in ("finalize", "reopen"):
+        raise _err(422, "invalid_action", "Acción desconocida: use finalize o reopen.")
+    detail, rv = row["detail"], row["review"] or {}
+    corr_rows = db.corrections(record_id)
+    corr = {e: c["stage"] for e, c in corr_rows.items()}
+    frac = detail["model"]["night_review_fraction"]
+    if body.action == "finalize":
+        if rv.get("status") == "finalized":
+            raise _err(409, "already_finalized", "La revisión ya está finalizada.")
+        summary = review.changes(detail, corr_rows)
+        if body.expected_corrected is not None and body.expected_corrected != summary["corrected"]:
+            raise _err(409, "stale_summary", f"Los cambios de esta noche cambiaron mientras veía el resumen "
+                                             f"(ahora son {summary['corrected']}). Revise el resumen de nuevo.")
+        new = review.state(detail["epochs"], corr, {"by": user["name"], "at": db.now()}, frac)
+    else:
+        if rv.get("status") != "finalized":
+            raise _err(409, "not_finalized", "La revisión no está finalizada.")
+        new = review.state(detail["epochs"], corr, {}, frac)
+    db.set_review(record_id, new)
+    db.log_action(record_id, user["name"], body.action, rv.get("status"), new["status"])
     return _review_payload(db.get(record_id))
+
+
+# ── notas del técnico (US-15) ─────────────────────────────────────────
+class NoteBody(BaseModel):
+    text: str
+
+
+@app.post(f"{API}/records/{{record_id}}/notes", status_code=201)
+def add_note(record_id: str, body: NoteBody, user: dict = Depends(auth)):
+    row = _get_done(record_id)
+    text = body.text.strip()
+    if not text:
+        raise _err(422, "empty_note", "Escriba la nota antes de guardarla.")
+    if len(text) > config.MAX_NOTE_CHARS:
+        raise _err(422, "note_too_long", f"La nota supera los {config.MAX_NOTE_CHARS} caracteres.")
+    db.add_note(row["id"], user["name"], text)
+    return {"notes": db.notes(record_id), "history": db.history(record_id, 200)}
 
 
 # ── exportación ───────────────────────────────────────────────────────

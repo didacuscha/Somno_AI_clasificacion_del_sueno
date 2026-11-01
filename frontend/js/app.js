@@ -1,5 +1,6 @@
 /* ════════════════════════════════════════════════════════════════════
-   MAIA · lógica de la aplicación (sesión, navegación, registros y carga)
+   MAIA · lógica de la aplicación (sesión, navegación, registros y
+   «Analizar nuevo»: catálogo de noches, PSG propio, canales y ventana).
    La vista de resultados y revisión vive en js/review.js.
    ════════════════════════════════════════════════════════════════════ */
 (function () {
@@ -7,15 +8,15 @@
 
   const { nf, pct, clockHM, fmtHM, fmtInt, median, esc } = MaiaUtil;
   const C = MaiaCharts, UI = MaiaUI, $ = UI.$;
-  const CFG = window.MAIA_CONFIG;
 
   let cfg = null;              // reglas del modelo (GET /config)
   let records = [];
   let filt = "all";
   let query = "";
   let listTimer = null;
-  let demos = null;
-  let showAllDemos = false;
+  let catalog = null;          // {source, nights}
+  let catFilt = "all";
+  let catQuery = "";
 
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -62,7 +63,7 @@
     if (v !== "vRes") MaiaReview.stopPolling();
     if (v !== "vList") clearTimeout(listTimer);
     if (v === "vList") refreshList();
-    if (v === "vUp") loadDemos();
+    if (v === "vUp") loadCatalog();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -70,6 +71,7 @@
 
   /* ══════════════ vista REGISTROS ══════════════ */
   const done = () => records.filter(r => r.status === "done" && r.review);
+  const finalized = r => r.review && (r.review.status === "finalized" || r.review.status === "signed_off");
 
   function renderTiles() {
     const ok = done();
@@ -78,10 +80,10 @@
     const busy = records.filter(r => r.status === "queued" || r.status === "running").length;
     $("tCountN").textContent = `${subjects} sujeto${subjects === 1 ? "" : "s"} distintos` +
       (busy ? ` · ${busy} en proceso` : "");
-    const todo = ok.filter(r => r.review.status !== "signed_off" && r.review.pending > 0);
+    const todo = ok.filter(r => !finalized(r) && r.review.pending > 0);
     countUp($("tTodo"), todo.length);
     const pend = todo.reduce((a, r) => a + r.review.pending, 0);
-    $("tTodoN").textContent = todo.length ? `${fmtInt(pend)} épocas pendientes` : "todo revisado";
+    $("tTodoN").textContent = todo.length ? `${fmtInt(pend)} épocas marcadas pendientes` : "todo revisado";
     if (ok.length) {
       countUp($("tCov"), 100 * median(ok.map(r => 1 - r.review.flagged_fraction)), v => nf(v, 1) + " %");
     } else $("tCov").textContent = "—";
@@ -98,25 +100,27 @@
   function renderTable() {
     const rows = records
       .filter(r => filt === "all"
-        || (filt === "todo" && r.status === "done" && r.review && r.review.status !== "signed_off")
+        || (filt === "todo" && r.status === "done" && r.review && !finalized(r))
         || (filt === "whole" && r.review && r.review.whole_night_recommended)
-        || (filt === "signed" && r.review && r.review.status === "signed_off"))
-      .filter(r => !query || r.subject_code.toLowerCase().includes(query) || r.file_name.toLowerCase().includes(query));
+        || (filt === "signed" && finalized(r)))
+      .filter(r => !query || [r.subject_code, r.file_name, r.night_label, r.combination_name]
+        .some(v => (v || "").toLowerCase().includes(query)));
     $("cnt").textContent = `${rows.length} registro${rows.length === 1 ? "" : "s"}`;
     if (!rows.length) {
-      $("tb").innerHTML = `<tr><td class="l" colspan="8" style="color:var(--muted);cursor:default">${
+      $("tb").innerHTML = `<tr><td class="l" colspan="8" style="color:var(--muted)">${
         records.length ? "Ningún registro coincide con el filtro." : "Aún no hay análisis: use «Analizar nuevo»."}</td></tr>`;
       return;
     }
     $("tb").replaceChildren(...rows.map((r, i) => {
       const tr = document.createElement("tr");
-      tr.className = "anim";
+      tr.className = "anim click";
       tr.style.setProperty("--i", Math.min(i, 12));
       const at = UI.parse(r.created_at), rv = r.review;
       const busy = r.status === "queued" || r.status === "running";
       tr.innerHTML = `<td class="l"><b>${esc(r.subject_code)}</b>${r.dataset_split === "test"
-          ? ' <span class="chip" title="Sujeto del test del proyecto">test</span>' : ""}</td>
-        <td class="l" style="color:var(--muted);font-size:12px">${esc(r.file_name)}</td>
+          ? ' <span class="chip" title="Sujeto del test del proyecto">test</span>' : ""}${r.subset
+          ? ' <span class="chip sub" title="Noche con canales faltantes">subconjunto</span>' : ""}</td>
+        <td class="l" style="color:var(--muted);font-size:12.5px">${esc(r.file_name)}</td>
         <td class="l" style="color:var(--muted);white-space:nowrap">${UI.dShort(at)} · ${UI.dTime(at)}</td>
         <td class="l">${UI.chips(r.channels || [], cfg.channels)}</td>
         <td>${r.status === "done" ? fmtInt(r.n_epochs) : "—"}</td>
@@ -126,7 +130,7 @@
           <button class="act del" title="Borrar registro" aria-label="Borrar registro" ${busy ? "disabled" : ""}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m5 5v6m4-6v6"/></svg>
-          </button><span class="act">→</span></span></td>`;
+          </button><span class="act" aria-hidden="true">→</span></span></td>`;
       tr.onclick = () => MaiaReview.open(r.id);
       tr.querySelector(".del").onclick = e => { e.stopPropagation(); askDelete(r); };
       return tr;
@@ -152,7 +156,7 @@
     }
     // mientras haya análisis en proceso, el listado se actualiza solo
     if (records.some(r => r.status === "queued" || r.status === "running") && !$("vList").classList.contains("hidden")) {
-      listTimer = setTimeout(refreshList, 3000);
+      listTimer = setTimeout(refreshList, 2500);
     }
   }
 
@@ -160,7 +164,7 @@
     const ok = await UI.confirm({
       title: "¿Borrar este registro?",
       html: `Se eliminará el análisis de <b>${esc(r.subject_code)}</b> (${esc(r.file_name)} · ` +
-        `${UI.dShort(UI.parse(r.created_at))}), con sus correcciones y su bitácora. Esta acción no se puede deshacer.`,
+        `${UI.dShort(UI.parse(r.created_at))}), con sus decisiones, notas y bitácora. Esta acción no se puede deshacer.`,
       confirmLabel: "Borrar registro", danger: true
     });
     if (!ok) return;
@@ -173,23 +177,18 @@
     }
   }
 
-  /* ══════════════ vista ANALIZAR ══════════════ */
+  /* ══════════════ vista ANALIZAR: 1 · elegir la noche ══════════════ */
   const U = {
-    source: null,          // {kind:"file", file, psgName} | {kind:"demo", demo}
-    hyp: null,             // archivo de hipnograma aparte
-    zipHyp: null,          // nombre del hipnograma dentro del .zip
-    header: null,          // encabezado del PSG (puede faltar si el navegador no abre el .zip)
-    detected: {},
-    slots: {},             // modalidad → {label, on}
+    source: null,          // {kind:"catalog", night} | {kind:"upload", upload}
+    header: null,          // {labels, fs, duration_s, start_clock_s, patient}
+    insp: null,            // canales del archivo según el servidor (channels.inspect)
+    slots: {},             // entrada → {label, on}
     mode: "full",
-    night: null            // noche del índice de Sleep-EDFx, si corresponde
+    night: null,           // datos de Sleep-EDFx de la noche (apagado de luces, partición)
+    uploading: null        // archivo que se está subiendo
   };
-  const hasRef = () => !!(U.hyp || U.zipHyp || (U.source && U.source.kind === "demo" && U.source.demo.has_hypnogram));
-
-  function showErr(el, msg) { el.textContent = msg; el.classList.add("show"); }
-  function hideErr(el) { el.classList.remove("show"); }
-
   const SLOT_ORDER = () => Object.keys(cfg.channels);
+  const hasRef = () => !!(U.source && (U.source.kind === "catalog" ? U.source.night.has_hypnogram : U.source.upload.hypnogram));
   const keyFor = slots => {
     const s = new Set(slots);
     const eeg = s.has("fpz") && s.has("pz") ? "eeg2" : s.has("fpz") ? "fpz" : "pz";
@@ -203,167 +202,203 @@
   const toHM = s => clockHM(((s % 86400) + 86400) % 86400);
   const fromHM = v => { const [h, m] = v.split(":").map(Number); return h * 3600 + m * 60; };
 
-  async function loadDemos() {
-    if (demos) return renderDemos();
+  function showErr(el, msg) { el.textContent = msg; el.classList.add("show"); }
+  function hideErr(el) { el.classList.remove("show"); }
+
+  async function loadCatalog(refresh = false) {
+    if (catalog && !refresh) return renderCatalog();
+    $("catList").innerHTML = '<div class="catempty"><span class="spin"></span>Leyendo el catálogo…</div>';
+    $("catRefresh").disabled = true;
     try {
-      demos = await MaiaAPI.listDemos();
+      catalog = await MaiaAPI.listCatalog(refresh);
     } catch (e) {
-      $("demoList").innerHTML = `<div class="mini">${esc(e.message)}</div>`;
+      catalog = null;
+      $("catList").innerHTML = `<div class="catempty">${esc(e.message)}<br>Puede subir su propio PSG más abajo.</div>`;
+      $("catCount").textContent = "";
       return;
+    } finally {
+      $("catRefresh").disabled = false;
     }
-    renderDemos();
+    const src = catalog.source;
+    $("catCap").innerHTML = src.kind === "s3"
+      ? `Noches de prueba guardadas en <b>${esc(src.location)}</b>. Elija una para cargar sus canales; se descarga al analizarla.`
+      : `Noches de prueba en el servidor (<b>${esc(src.location.split("/").slice(-2).join("/"))}</b>). Elija una para cargar sus canales.`;
+    renderCatalog();
   }
 
-  function renderDemos() {
-    if (!demos.length) {
-      $("demoList").innerHTML = '<div class="mini">No hay noches del dataset en el servidor ' +
-        "(<code>backend/data/demo/download_demos.sh</code> las descarga).</div>";
+  function nightText(n) {
+    const who = [n.subject != null ? `sujeto ${String(n.subject).padStart(2, "0")}` : null,
+                 n.night != null ? `noche ${n.night}` : null].filter(Boolean).join(", ");
+    const pers = [UI.sexText(n.sex), n.age ? `${n.age} años` : null].filter(Boolean).join(", ");
+    return { who, pers };
+  }
+
+  function renderCatalog() {
+    if (!catalog) return;
+    const q = catQuery;
+    const list = catalog.nights.filter(n =>
+      (catFilt === "all" || (catFilt === "test" && n.split === "test") || (catFilt === "subset" && n.subset)) &&
+      (!q || [n.label, n.id, n.psg, nightText(n).who, n.split === "test" ? "test" : "desarrollo",
+              n.subset ? "subconjunto canales faltantes" : "", n.available.map(s => cfg.channels[s].name + " " + s).join(" ")]
+        .join(" ").toLowerCase().includes(q)));
+    $("catCount").textContent = `${list.length} de ${catalog.nights.length} noche${catalog.nights.length === 1 ? "" : "s"}`;
+    if (!list.length) {
+      $("catList").innerHTML = `<div class="catempty">${catalog.nights.length
+        ? "Ninguna noche coincide con la búsqueda." : "El catálogo está vacío."}</div>`;
       return;
     }
-    const list = showAllDemos ? demos : demos.slice(0, 4);
-    const sel = U.source && U.source.kind === "demo" ? U.source.demo.id : null;
-    $("demoList").innerHTML = list.map(d => {
-      const sex = UI.sexText(d.sex);
-      const slots = SLOT_ORDER().filter(s => d.detected[s]);
-      return `<div class="filerow demo ${d.id === sel ? "sel" : ""}" data-id="${d.id}" role="button" tabindex="0">
-        <div class="ic">EDF</div>
-        <div style="min-width:0"><div class="nm">${d.id} · sujeto ${String(d.subject).padStart(2, "0")}, noche ${d.night}
-          ${d.split === "test" ? '<span class="chip eeg">test</span>' : '<span class="chip">desarrollo</span>'}</div>
-          <div class="mt">${sex}, ${d.age} años · ${UI.chips(slots, cfg.channels)} · ${fmtHM(d.header.duration_s)}
-          ${d.has_hypnogram ? "· con hipnograma" : ""}</div></div></div>`;
-    }).join("") + (demos.length > 4 ? `<button class="linkbtn" id="btnAllDemos">${showAllDemos
-      ? "Mostrar menos" : `Ver las ${demos.length} noches disponibles`}</button>` : "");
-    $("demoList").querySelectorAll(".filerow.demo").forEach(el => {
-      const pick = () => pickDemo(demos.find(d => d.id === el.dataset.id));
-      el.onclick = pick;
-      el.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
+    const sel = U.source && U.source.kind === "catalog" ? U.source.night.id : null;
+    $("catList").innerHTML = list.map(n => {
+      const t = nightText(n);
+      return `<button type="button" class="night" data-id="${esc(n.id)}" aria-pressed="${n.id === sel}">
+        <span class="id">${esc(n.label)}</span>
+        <span style="min-width:0"><span class="who">${esc(t.who || n.psg)}${t.pers ? ` · ${esc(t.pers)}` : ""}</span>
+          <span class="mt">${UI.chips(n.available, cfg.channels)} <span>${fmtHM(n.header.duration_s)}</span>
+          <span>${n.channels.total} canales en el archivo</span>${n.has_hypnogram ? "<span>· con hipnograma</span>" : ""}</span></span>
+        <span class="tags">${n.subset ? '<span class="chip sub">canales faltantes</span>' : ""}${n.split === "test"
+          ? '<span class="chip eeg">test</span>' : n.split === "dev" ? '<span class="chip">desarrollo</span>' : ""}</span>
+      </button>`;
+    }).join("");
+    $("catList").querySelectorAll(".night").forEach(el => {
+      el.onclick = () => pickNight(catalog.nights.find(n => n.id === el.dataset.id));
     });
-    if ($("btnAllDemos")) $("btnAllDemos").onclick = () => { showAllDemos = !showAllDemos; renderDemos(); };
   }
 
-  function pickDemo(d) {
-    clearFile(false);
-    U.source = { kind: "demo", demo: d };
-    U.header = { labels: d.header.labels, fs: d.header.fs, durationS: d.header.duration_s,
-                 startClockS: d.header.start_clock_s, patient: { age: d.age, sex: d.sex } };
-    U.night = d;
-    renderDemos();
+  function pickNight(n) {
+    if (U.source && U.source.kind === "upload") clearUpload();
+    U.source = { kind: "catalog", night: n };
+    U.header = n.header;
+    U.insp = n.channels;
+    U.night = n.split ? n : null;
+    renderCatalog();
     configure();
     $("cfgPanel").scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
   }
 
-  async function setFile(file) {
+  /* ── PSG propio (opción secundaria) ── */
+  async function setFile(file, hypFile) {
     hideErr($("upErr"));
     if (!file) return;
     if (!/\.(edf|zip)$/i.test(file.name)) {
-      return showErr($("upErr"), "Formato no aceptado: cargue un .edf o un .zip con el par PSG + hipnograma.");
+      return showErr($("upErr"), "Formato no aceptado: suba un PSG .edf (o un .zip con el PSG y su hipnograma).");
     }
     if (file.size > cfg.max_upload_mb * 1048576) {
       return showErr($("upErr"), `El archivo supera el límite de ${cfg.max_upload_mb} MB.`);
     }
-    const isZip = /\.zip$/i.test(file.name);
-    let header = null, psgName = file.name, zipHyp = null;
-    try {
-      if (isZip) {
-        const z = await MaiaEdf.readZip(file);
-        if (!z) return showErr($("upErr"), "El .zip está dañado o no es un zip válido.");
-        if (!z.psg) return showErr($("upErr"), "El .zip no contiene el PSG (.edf con la señal).");
-        header = z.psg.header;
-        psgName = z.psg.name;
-        zipHyp = z.hypnogram ? z.hypnogram.name : null;
-      } else {
-        header = await MaiaEdf.readEdf(file);
-        if (!header) return showErr($("upErr"), "El archivo no es un EDF válido (encabezado ilegible).");
-      }
-    } catch (e) { header = null; }
-    if (header && header.annotationsOnly) {
-      return showErr($("upErr"), "Ese archivo es solo el hipnograma (anotaciones, sin señal). Cargue primero el PSG " +
-        "y luego agregue el hipnograma como referencia.");
-    }
-    demoDeselect();
-    U.source = { kind: "file", file, psgName };
-    U.header = header;
-    U.zipHyp = zipHyp;
-    U.hyp = null;
-    U.night = null;
-    try { U.night = await MaiaAPI.lookupNight(psgName); } catch (e) { /* sin índice */ }
-    if (U.source.file !== file) return;              // cambiaron de archivo mientras tanto
-    const mb = nf(file.size / 1048576) + " MB";
-    $("fileSelName").textContent = isZip ? `${file.name} → ${psgName}` : file.name;
-    $("fileSel").querySelector(".ic").textContent = isZip ? "ZIP" : "EDF";
-    const sex = header ? UI.sexText(header.patient.sex) : null;
-    $("fileSelMeta").textContent = [
-      mb,
-      header ? `${header.nChannels} canales` : "encabezado no legible en el navegador (se verificará al subir)",
-      header && header.durationS ? fmtHM(header.durationS) + (header.startClockS != null ? ` desde las ${clockHM(header.startClockS)}` : "") : null,
-      header && (sex || header.patient.age) ? [sex, header.patient.age ? header.patient.age + " años" : null].filter(Boolean).join(", ") : null,
-      zipHyp ? "incluye hipnograma" : null
-    ].filter(Boolean).join(" · ");
+    clearUpload();
+    if (U.source && U.source.kind === "catalog") { U.source = null; renderCatalog(); configure(); }
+    U.uploading = file;
     $("fileSel").classList.remove("hidden");
-    $("btnAddHyp").classList.toggle("hidden", !!zipHyp);
-    $("hypSel").classList.add("hidden");
-    configure();
+    $("fileSelName").textContent = file.name;
+    $("fileSel").querySelector(".ic").textContent = /\.zip$/i.test(file.name) ? "ZIP" : "EDF";
+    $("fileSelMeta").textContent = `${nf(file.size / 1048576)} MB · subiendo y revisando el archivo…`;
+    $("upBar").classList.remove("hidden");
+    $("upBar").firstElementChild.style.width = "0";
+    $("fileSelRm").disabled = true;
+    try {
+      const up = await MaiaAPI.uploadPsg(file, hypFile, f => {
+        $("upBar").firstElementChild.style.width = (100 * f).toFixed(1) + "%";
+        if (f >= 1) $("fileSelMeta").textContent = `${nf(file.size / 1048576)} MB · el servidor está leyendo los canales…`;
+      });
+      if (U.uploading !== file) return;            // lo cambiaron mientras tanto
+      U.uploading = null;
+      U.source = { kind: "upload", upload: up };
+      U.header = up.header;
+      U.insp = up.channels;
+      U.night = up.dataset;
+      showUpload();
+      configure();
+      $("cfgPanel").scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+    } catch (e) {
+      if (U.uploading !== file) return;
+      U.uploading = null;
+      $("fileSel").classList.add("hidden");
+      $("fileInput").value = "";
+      showErr($("upErr"), e.message || "No se pudo subir el archivo.");
+    } finally {
+      $("upBar").classList.add("hidden");
+      $("fileSelRm").disabled = false;
+    }
+  }
+
+  function showUpload() {
+    const up = U.source.upload, h = up.header;
+    const sex = UI.sexText(h.patient.sex);
+    $("fileSelName").textContent = up.file_name;
+    $("fileSelMeta").textContent = [
+      `${nf(up.size_mb)} MB`, `${up.channels.total} canal${up.channels.total === 1 ? "" : "es"} · ${up.channels.usable} utilizable${up.channels.usable === 1 ? "" : "s"} por el modelo`,
+      h.duration_s ? fmtHM(h.duration_s) + (h.start_clock_s != null ? ` desde las ${clockHM(h.start_clock_s)}` : "") : null,
+      sex || h.patient.age ? [sex, h.patient.age ? h.patient.age + " años" : null].filter(Boolean).join(", ") : null
+    ].filter(Boolean).join(" · ");
+    const hyp = up.hypnogram;
+    $("hypSel").classList.toggle("hidden", !hyp);
+    $("btnAddHyp").classList.toggle("hidden", !!hyp);
+    if (hyp) {
+      $("hypSelName").textContent = hyp.name;
+      $("hypSelMeta").textContent = "Hipnograma de referencia · sirve para comparar y para recortar la noche";
+    }
   }
 
   async function setHyp(file) {
     hideErr($("upErr"));
-    if (!file) return;
-    if (!/\.edf$/i.test(file.name)) return showErr($("upErr"), "El hipnograma debe ser un .edf (EDF+ con anotaciones).");
-    const h = await MaiaEdf.readEdf(file).catch(() => null);
-    if (!h || !h.annotationsOnly) {
-      return showErr($("upErr"), "Ese archivo no parece un hipnograma: debe ser un EDF+ que solo trae anotaciones de estadios.");
+    if (!file || !U.source || U.source.kind !== "upload") return;
+    $("btnAddHyp").disabled = true;
+    try {
+      U.source.upload = await MaiaAPI.attachHypnogram(U.source.upload.id, file);
+      showUpload();
+      U.mode = "reference";
+      renderWindow();
+    } catch (e) {
+      showErr($("upErr"), e.message || "No se pudo adjuntar el hipnograma.");
+    } finally {
+      $("btnAddHyp").disabled = false;
+      $("hypInput").value = "";
     }
-    U.hyp = file;
-    $("hypSelName").textContent = file.name;
-    $("hypSelMeta").textContent = "Hipnograma de referencia · se usa para la concordancia y la ventana de sueño";
-    $("hypSel").classList.remove("hidden");
-    $("btnAddHyp").classList.add("hidden");
-    configure();
   }
 
-  function clearHyp() {
-    U.hyp = null;
-    $("hypInput").value = "";
-    $("hypSel").classList.add("hidden");
-    $("btnAddHyp").classList.toggle("hidden", !(U.source && U.source.kind === "file"));
-    configure();
+  async function clearHyp() {
+    if (!U.source || U.source.kind !== "upload") return;
+    try {
+      U.source.upload = await MaiaAPI.removeHypnogram(U.source.upload.id);
+    } catch (e) { UI.toast(e.message, true); return; }
+    showUpload();
+    if (U.mode === "reference") U.mode = U.header.duration_s > 14 * 3600 ? "range" : "full";
+    renderWindow();
   }
 
-  function demoDeselect() {
-    if (U.source && U.source.kind === "demo") { U.source = null; renderDemos(); }
-  }
-
-  function clearFile(reconfigure = true) {
-    if (U.source && U.source.kind === "file") U.source = null;
-    U.hyp = null; U.zipHyp = null;
+  /* quita el PSG subido (el servidor lo borra si todavía no se analizó) */
+  function clearUpload() {
+    U.uploading = null;
+    if (U.source && U.source.kind === "upload") {
+      MaiaAPI.deleteUpload(U.source.upload.id).catch(() => {});
+      U.source = null;
+      configure();
+    }
     $("fileInput").value = "";
     $("hypInput").value = "";
     ["fileSel", "hypSel", "btnAddHyp"].forEach(id => $(id).classList.add("hidden"));
-    if (reconfigure) configure();
   }
 
-  /* ── paso 2 y 3: canales y ventana ── */
+  /* ══════════════ 2 · canales y 3 · ventana ══════════════ */
   function configure() {
     hideErr($("runErr"));
     if (!U.source) { $("cfgPanel").classList.add("hidden"); return; }
     $("cfgPanel").classList.remove("hidden");
-    const h = U.header;
-    U.detected = h ? MaiaEdf.detect(h.labels, cfg.channel_aliases) : {};
     U.slots = {};
     SLOT_ORDER().forEach(s => {
-      const label = h ? U.detected[s] || null : s;    // sin encabezado: la API verificará
+      const label = U.insp.matched[s] || null;
       U.slots[s] = { label, on: !!label };
     });
-    const src = U.source.kind === "demo" ? U.source.demo.psg : U.source.psgName;
     const n = U.night;
+    const name = U.source.kind === "catalog" ? U.source.night.psg : U.source.upload.file_name;
     $("cfgSource").innerHTML = [
-      `<b>${esc(src)}</b>`,
-      h ? `${h.labels.length} canales en el archivo` : null,
-      n ? `sujeto ${n.subject}, noche ${n.night} de Sleep-EDFx (${n.split === "test"
+      `<b>${esc(name)}</b>`,
+      U.source.kind === "catalog" && U.source.night.subset ? `noche con canales faltantes${UI.info("subset")}` : null,
+      n && n.subject != null ? `sujeto ${n.subject}, noche ${n.night} de Sleep-EDFx (${n.split === "test"
         ? "test: el modelo no lo vio" : "desarrollo: el modelo se entrenó con él"})` : null
     ].filter(Boolean).join(" · ");
-
-    U.mode = hasRef() ? "reference" : (h && h.durationS > 14 * 3600 ? "range" : "full");
+    const h = U.header;
+    U.mode = hasRef() ? "reference" : (h.duration_s > 14 * 3600 ? "range" : "full");
     const lo = n && n.lights_off ? n.lights_off : "";
     $("lightsOff").value = lo;
     const start = lo ? fromHM(lo) : 22 * 3600;
@@ -373,43 +408,76 @@
     renderWindow();
   }
 
+  /* otra entrada (encendida) que ya usa esa etiqueta, o null */
+  const usedBy = (label, except) => SLOT_ORDER().find(s => s !== except && U.slots[s].on && U.slots[s].label === label) || null;
+
   function renderChannels() {
-    const h = U.header;
-    const labels = h ? h.labels.filter(l => l !== "EDF Annotations") : [];
+    const h = U.header, insp = U.insp;
+    $("chSummary").innerHTML = `<b>${insp.total} canal${insp.total === 1 ? "" : "es"} en el archivo</b> · ` +
+      `${insp.usable} utilizable${insp.usable === 1 ? "" : "s"} por el modelo${UI.info("usable")}`;
     $("chGrid").innerHTML = SLOT_ORDER().map(slot => {
-      const info = cfg.channels[slot], st = U.slots[slot], avail = !!st.label;
-      const fs = avail && h ? h.fs[st.label] : null;
+      const info = cfg.channels[slot], st = U.slots[slot], cands = insp.candidates[slot] || [];
+      const avail = cands.length > 0;
+      const fs = st.label ? h.fs[st.label] : null;
       const warns = [];
-      if (avail && h && st.label !== U.detected[slot]) warns.push(`Asignado a mano: el modelo se entrenó con ${info.label}.`);
+      if (st.label && st.label !== insp.matched[slot]) warns.push(`Asignado a mano: el modelo se entrenó con ${info.label}.`);
       if (slot === "emg" && fs > 1) warns.push("El modelo se entrenó con la envolvente del EMG a 1 Hz de Sleep-EDFx; un EMG crudo puede no ser comparable.");
       if (slot !== "emg" && fs && fs < 100) warns.push(`Frecuencia de ${nf(fs, 0)} Hz: el modelo se entrenó a 100 Hz.`);
-      const opts = ['<option value="">— sin asignar —</option>']
-        .concat(labels.map(l => `<option value="${esc(l)}" ${l === st.label ? "selected" : ""}>${esc(l)}</option>`)).join("");
+      const opts = ['<option value="">— sin asignar —</option>'].concat(cands.map(l => {
+        const other = usedBy(l, slot);
+        return `<option value="${esc(l)}" ${l === st.label ? "selected" : ""} ${other ? "disabled" : ""}>${esc(l)}${
+          other ? ` — en uso en ${esc(cfg.channels[other].name)}` : ""}</option>`;
+      })).join("");
       return `<div class="chcard ${st.on ? "on" : ""} ${avail ? "" : "na"}" data-slot="${slot}">
         <label class="sw"><input type="checkbox" ${st.on ? "checked" : ""} ${avail ? "" : "disabled"}
           aria-label="Usar ${esc(info.label)}"><span></span></label>
         <div style="min-width:0">
           <div class="chname">${esc(info.label)} <span class="chip ${info.kind === "eeg" ? "eeg" : ""}">${info.kind.toUpperCase()}</span></div>
-          <div class="chsrc">${h ? `Canal del archivo: <select aria-label="Canal del archivo para ${esc(info.label)}">${opts}</select>`
-            : "Se verificará al subir el archivo"}${fs ? ` · ${nf(fs, 0)} Hz` : ""}</div>
-          ${!avail && h ? '<div class="chwarn">No se encontró en el archivo. Puede asignarle un canal a mano.</div>' : ""}
+          ${avail ? `<div class="chsrc">Canal del archivo: <select aria-label="Canal del archivo para ${esc(info.label)}">${opts}</select>${
+            fs ? ` · ${nf(fs, 0)} Hz` : ""}</div>`
+            : `<div class="chsrc">El archivo no tiene ningún canal de ${info.kind.toUpperCase()}.</div>`}
+          ${avail && !insp.matched[slot] ? `<div class="chsrc">El archivo no tiene ${esc(info.label)}; puede asignar a mano otro canal de ${info.kind.toUpperCase()}.</div>` : ""}
           ${warns.map(w => `<div class="chwarn">${esc(w)}</div>`).join("")}
         </div></div>`;
     }).join("");
     $("chGrid").querySelectorAll(".chcard").forEach(card => {
       const slot = card.dataset.slot, st = U.slots[slot];
-      card.querySelector("input").onchange = e => { st.on = e.target.checked; renderChannels(); };
+      card.querySelector("input").onchange = e => {
+        st.on = e.target.checked;
+        if (st.on && (!st.label || usedBy(st.label, slot))) {       // asigna el primer canal libre de su tipo
+          st.label = (U.insp.candidates[slot] || []).find(l => !usedBy(l, slot)) || null;
+          if (!st.label) { st.on = false; UI.toast(`No queda un canal de ${cfg.channels[slot].kind.toUpperCase()} libre para ${cfg.channels[slot].name}.`); }
+        }
+        renderChannels();
+      };
       const sel = card.querySelector("select");
-      if (sel) sel.onchange = e => { st.label = e.target.value || null; st.on = !!st.label; renderChannels(); };
+      if (sel) sel.onchange = e => {
+        st.label = e.target.value || null;
+        st.on = !!st.label;
+        // una entrada apagada que tenía ese canal lo suelta
+        SLOT_ORDER().forEach(s => { if (s !== slot && !U.slots[s].on && U.slots[s].label === st.label) U.slots[s].label = null; });
+        renderChannels();
+      };
     });
-    const used = new Set(Object.values(U.slots).filter(s => s.label).map(s => s.label));
-    const other = labels.filter(l => !used.has(l));
-    $("otherCh").textContent = other.length ? `Otros canales del archivo, que el modelo no usa: ${other.join(", ")}.` : "";
+    const unused = insp.unused || [];
+    $("unusedCh").classList.toggle("hidden", !unused.length);
+    $("unusedCh").innerHTML = `<span class="lbl">En el archivo, no los usa el modelo${UI.info("unused")}</span>` +
+      unused.map(l => `<span class="chip off">${esc(l)}</span>`).join("");
     updateCombo();
   }
 
   function selectedSlots() {
     return SLOT_ORDER().filter(s => U.slots[s] && U.slots[s].on && U.slots[s].label);
+  }
+
+  function expectedText(key) {
+    const e = cfg.expected[key];
+    if (!e) return "";
+    return `Con esta combinación, el modelo del proyecto obtuvo en noches de prueba un F1 macro${UI.info("f1_macro")} de ` +
+      `<b>${nf(e.test_mf1, 3)}</b> (intervalo ${nf(e.test_ci[0], 3)}–${nf(e.test_ci[1], 3)}) y una kappa de Cohen${UI.info("kappa")} ` +
+      `de ${nf(e.test_kappa, 3)}, donde 1 es acuerdo perfecto con el experto.` +
+      (e.test_mf1 < cfg.mf1_goal ? ` <span style="color:var(--warn-text)">Es de las combinaciones menos precisas: si el ` +
+        "registro tiene Fpz-Cz o EOG, conviene agregarlos.</span>" : "");
   }
 
   function updateCombo() {
@@ -419,16 +487,13 @@
     const hasEeg = slots.includes("fpz") || slots.includes("pz");
     if (!hasEeg) {
       $("comboName").textContent = "—";
-      $("comboText").innerHTML = '<span style="color:var(--crit)">Seleccione al menos un EEG (Fpz-Cz o Pz-Oz): ' +
-        "el EOG y el EMG solo complementan al EEG.</span>";
+      $("comboText").innerHTML = `<span style="color:var(--crit)">${slots.length ? "Seleccione al menos un EEG (Fpz-Cz o Pz-Oz): " +
+        "el EOG y el EMG solo complementan al EEG." : "Seleccione al menos un canal."}</span>`;
       C.renderCombos($("c-combos"), cfg.expected, names, null, cfg.mf1_goal);
     } else {
-      const key = keyFor(slots), e = cfg.expected[key];
+      const key = keyFor(slots);
       $("comboName").textContent = comboName(slots);
-      $("comboText").innerHTML = `Con esta combinación, el modelo del proyecto obtuvo en el test MF1 ` +
-        `<b>${nf(e.test_mf1, 3)}</b> [${nf(e.test_ci[0], 3)}; ${nf(e.test_ci[1], 3)}] y κ ${nf(e.test_kappa, 3)}.` +
-        (e.test_mf1 < cfg.mf1_goal ? ` <span style="color:var(--warn-text)">Queda bajo la meta de MF1 ` +
-          `${nf(cfg.mf1_goal, 2)}: si el registro tiene Fpz-Cz o EOG, conviene agregarlos.</span>` : "");
+      $("comboText").innerHTML = expectedText(key);
       C.renderCombos($("c-combos"), cfg.expected, names, key, cfg.mf1_goal);
     }
     validate();
@@ -438,13 +503,13 @@
     const h = U.header;
     document.querySelectorAll("#winMode button").forEach(b => {
       const m = b.dataset.m;
-      b.disabled = (m === "reference" && !hasRef()) || (m === "range" && h && h.startClockS == null);
+      b.disabled = (m === "reference" && !hasRef()) || (m === "range" && h.start_clock_s == null);
       b.title = m === "reference" && !hasRef() ? "Necesita el hipnograma de referencia" : "";
       b.setAttribute("aria-pressed", String(m === U.mode));
     });
     document.querySelectorAll(".rangeOnly").forEach(el => el.classList.toggle("hidden", U.mode !== "range"));
-    const span = h && h.startClockS != null && h.durationS
-      ? `el registro va de ${clockHM(h.startClockS)} a ${clockHM(h.startClockS + h.durationS)}` : "";
+    const span = h.start_clock_s != null && h.duration_s
+      ? `el registro va de ${clockHM(h.start_clock_s)} a ${clockHM(h.start_clock_s + h.duration_s)}` : "";
     let txt = "";
     if (U.mode === "reference") {
       txt = "Desde 30 min antes del primer estadio de sueño del hipnograma hasta 30 min después del último: " +
@@ -458,50 +523,64 @@
       }
       txt = `Se analizan las épocas entre las dos horas${span ? ` (${span})` : ""}.${dur}`;
     } else {
-      txt = h && h.durationS ? `Se analizan las ${fmtHM(h.durationS)} del archivo (${fmtInt(Math.floor(h.durationS / 30))} épocas).` +
-        (h.durationS > 14 * 3600 ? " <b>Incluye la vigilia diurna</b>, que no forma parte de la ventana con que se evaluó el modelo." : "")
+      txt = h.duration_s ? `Se analizan las ${fmtHM(h.duration_s)} del archivo (${fmtInt(Math.floor(h.duration_s / 30))} épocas).` +
+        (h.duration_s > 14 * 3600 ? " <b>Incluye la vigilia diurna</b>, que no forma parte de la noche con que se evaluó el modelo." : "")
         : "Se analiza el archivo completo.";
     }
-    const loSrc = U.night && $("lightsOff").value === U.night.lights_off ? " (del índice de Sleep-EDFx)" : "";
-    $("winHelp").innerHTML = txt + "<br>El <b>apagado de luces</b>" + loSrc + " alimenta la hora de la noche (un rasgo " +
-      "del modelo) y la latencia de sueño; si se deja vacío, se toma el inicio de la ventana.";
+    const loSrc = U.night && U.night.lights_off && $("lightsOff").value === U.night.lights_off ? " (del índice de Sleep-EDFx)" : "";
+    $("winHelp").innerHTML = txt + "<br>El <b>apagado de luces</b>" + loSrc + " marca el inicio del tiempo en cama y de la " +
+      "latencia de sueño; si se deja vacío, se toma el inicio de la ventana.";
     validate();
   }
 
-  function validate() {
+  /* qué impide analizar (o null): se muestra junto al botón */
+  function blocker() {
+    if (!U.source) return "Elija una noche.";
     const slots = selectedSlots();
-    const ok = !!U.source && (slots.includes("fpz") || slots.includes("pz"))
-      && (U.mode !== "range" || ($("winStart").value && $("winEnd").value));
-    $("btnRun").disabled = !ok;
+    if (!slots.length) return "Seleccione al menos un canal.";
+    if (!(slots.includes("fpz") || slots.includes("pz"))) return "Seleccione al menos un EEG (Fpz-Cz o Pz-Oz).";
+    const labels = slots.map(s => U.slots[s].label);
+    if (new Set(labels).size < labels.length) return "Un mismo canal del archivo no puede ocupar dos entradas.";
+    if (U.mode === "range" && !($("winStart").value && $("winEnd").value)) return "Indique la hora de inicio y la de fin.";
+    return null;
+  }
+
+  function validate() {
+    const why = blocker();
+    $("btnRun").disabled = !!why || $("btnRun").dataset.busy === "1";
+    $("runMsg").textContent = U.source ? (why || "") : "";
   }
 
   async function runAnalyze() {
-    const btn = $("btnRun"), original = btn.textContent;
+    const btn = $("btnRun");
     hideErr($("runErr"));
     const channels = selectedSlots();
     const channelMap = {};
-    if (U.header) channels.forEach(s => { if (U.slots[s].label !== U.detected[s]) channelMap[s] = U.slots[s].label; });
-    const payload = {
-      channels, channelMap, windowMode: U.mode,
-      startClock: U.mode === "range" ? $("winStart").value : null,
-      endClock: U.mode === "range" ? $("winEnd").value : null,
-      lightsOff: $("lightsOff").value || "none"
-    };
+    channels.forEach(s => { if (U.slots[s].label !== U.insp.matched[s]) channelMap[s] = U.slots[s].label; });
+    const source = U.source.kind === "catalog" ? { type: "catalog", id: U.source.night.id }
+      : { type: "upload", id: U.source.upload.id };
+    const label = U.source.kind === "catalog" ? U.source.night.label : U.source.upload.file_name;
+    btn.dataset.busy = "1";
     btn.disabled = true;
-    btn.innerHTML = `<span class="spin"></span>${U.source.kind === "file" ? "Subiendo el registro…" : "Enviando…"}`;
+    btn.innerHTML = '<span class="spin"></span>Enviando…';
     try {
-      const r = U.source.kind === "demo"
-        ? await MaiaAPI.createDemoAnalysis({ demoId: U.source.demo.id, ...payload })
-        : await MaiaAPI.createAnalysis({ file: U.source.file, hypnogram: U.hyp, ...payload });
-      clearFile(false);
-      U.source = null;
-      $("cfgPanel").classList.add("hidden");
-      if (demos) renderDemos();
-      MaiaReview.open(r.id);
+      const r = await MaiaAPI.createAnalysis({
+        source, channels, channelMap, windowMode: U.mode,
+        startClock: U.mode === "range" ? $("winStart").value : null,
+        endClock: U.mode === "range" ? $("winEnd").value : null,
+        lightsOff: $("lightsOff").value || "none"
+      });
+      if (U.source && U.source.kind === "upload") {
+        // la carga ya pertenece a un análisis: el formulario la suelta sin borrarla
+        U.source = null; $("fileSel").classList.add("hidden"); $("hypSel").classList.add("hidden");
+        $("btnAddHyp").classList.add("hidden"); $("fileInput").value = ""; configure();
+      }
+      MaiaReview.watch(r, `${label} · ${comboName(channels)}`);
     } catch (e) {
       showErr($("runErr"), e.message || "No se pudo iniciar el análisis.");
     } finally {
-      btn.textContent = original;
+      btn.dataset.busy = "";
+      btn.textContent = "Analizar →";
       validate();
     }
   }
@@ -525,12 +604,12 @@
       $("cnt").textContent = "No se pudo contactar la API. ¿Está corriendo el backend?";
       return;
     }
+    UI.setRules(nf(cfg.confidence_threshold, 2), pct(cfg.night_review_fraction));
     MaiaReview.cfg = cfg;
     $("maxMb").textContent = cfg.max_upload_mb;
     $("nightLimit").textContent = pct(cfg.night_review_fraction);
-    const kind = { provisional: "provisional", mock: "simulado", sagemaker: "SageMaker" }[cfg.model.kind] || cfg.model.kind;
-    $("modelPill").textContent = `Modelo ${kind}${MaiaAPI.isMock() ? " · modo demo" : ""}`;
-    $("modelPill").title = `Modelo que atiende los análisis: ${cfg.model.version}`;
+    $("modelPill").textContent = `${cfg.model.name}${MaiaAPI.isMock() ? " · modo demo" : ""}`;
+    $("modelPill").title = `Modelo que atiende los análisis: ${cfg.model.version} · umbral de confianza ${nf(cfg.confidence_threshold, 2)}`;
     go("vList");
   }
 
@@ -562,7 +641,7 @@
   function doLogout() {
     MaiaAPI.clearSession();
     records = [];
-    demos = null;
+    catalog = null;
     showLogin();
   }
 
@@ -582,20 +661,29 @@
   $("backRes").onclick = () => go("vList");
   $("btnExportAll").onclick = () => MaiaAPI.exportCorrections().catch(e => UI.toast(e.message, true));
 
-  $("filt").onclick = e => {
-    const b = e.target.closest("button");
-    if (!b) return;
-    [...e.currentTarget.children].forEach(c => c.setAttribute("aria-pressed", String(c === b)));
-    filt = b.dataset.f;
-    renderTable();
+  const chipFilter = (id, fn) => {
+    $(id).onclick = e => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      [...e.currentTarget.children].forEach(c => c.setAttribute("aria-pressed", String(c === b)));
+      fn(b.dataset.f);
+    };
   };
+  chipFilter("filt", f => { filt = f; renderTable(); });
+  chipFilter("catFilt", f => { catFilt = f; renderCatalog(); });
   $("srch").addEventListener("input", e => { query = e.target.value.trim().toLowerCase(); renderTable(); });
+  $("catSearch").addEventListener("input", e => { catQuery = e.target.value.trim().toLowerCase(); renderCatalog(); });
+  $("catRefresh").onclick = () => loadCatalog(true);
 
-  // carga: clic, teclado y arrastre
+  // PSG propio: clic, teclado y arrastre
+  $("btnShowUpload").onclick = () => {
+    const open = $("upArea").classList.toggle("hidden") === false;
+    $("btnShowUpload").setAttribute("aria-expanded", String(open));
+  };
   $("dz").onclick = () => $("fileInput").click();
   $("dz").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("fileInput").click(); } };
   $("fileInput").addEventListener("change", e => setFile(e.target.files[0]));
-  $("fileSelRm").onclick = () => clearFile();
+  $("fileSelRm").onclick = () => clearUpload();
   $("btnAddHyp").onclick = () => $("hypInput").click();
   $("hypInput").addEventListener("change", e => setHyp(e.target.files[0]));
   $("hypSelRm").onclick = clearHyp;
@@ -604,8 +692,8 @@
   $("dz").addEventListener("drop", e => {
     const files = [...e.dataTransfer.files];
     const psg = files.find(f => !/hypno/i.test(f.name)) || files[0];
-    const hyp = files.find(f => f !== psg && /\.edf$/i.test(f.name));
-    setFile(psg).then(() => { if (hyp && U.source && U.source.kind === "file") setHyp(hyp); });
+    const hyp = files.find(f => f !== psg && /\.edf$/i.test(f.name) && /hypno/i.test(f.name));
+    setFile(psg, hyp);
   });
 
   // los gráficos se dibujan a la escala de su contenedor: al cambiar el ancho se redibujan
@@ -627,6 +715,8 @@
   };
   ["winStart", "winEnd", "lightsOff"].forEach(id => $(id).addEventListener("input", renderWindow));
   $("btnRun").onclick = runAnalyze;
+
+  window.MaiaApp = { go, refreshList };
 
   /* ══════════════ arranque ══════════════ */
   if (MaiaAPI.isLoggedIn()) enterApp(MaiaAPI.currentUser());

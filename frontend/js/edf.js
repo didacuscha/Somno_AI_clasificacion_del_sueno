@@ -1,11 +1,12 @@
 /* ════════════════════════════════════════════════════════════════════
-   MAIA · lectura de encabezados EDF en el navegador
+   MAIA · lectura de encabezados EDF en el navegador (solo modo demo)
    ────────────────────────────────────────────────────────────────────
-   Antes de subir nada, el tablero lee el encabezado del EDF (canales,
-   frecuencias, hora de inicio, duración, edad y sexo) para que el usuario
-   elija canales y ventana. Para un .zip se localiza el PSG en el
-   directorio central y se descomprimen solo sus primeros bytes.
-   La API vuelve a validar todo al recibir el archivo.
+   Con la API, el PSG se sube primero y es el servidor quien lee el
+   encabezado y reconoce los canales (POST /uploads). Sin backend (modo
+   demo), el simulado de js/mock.js usa esto para leer en el navegador
+   canales, frecuencias, hora de inicio, duración, edad y sexo. Para un
+   .zip se localiza el PSG en el directorio central y se descomprimen
+   solo sus primeros bytes.
    ════════════════════════════════════════════════════════════════════ */
 (function () {
   "use strict";
@@ -125,20 +126,5 @@
              hypnogram: hyp ? { name: hyp.base } : null };
   }
 
-  /* mismas reglas que la API (app/channels.py), con los patrones que entrega GET /config */
-  const normalize = label => label.trim().toLowerCase().replace(/[–—]/g, "-").replace(/[\s_.]+/g, "");
-
-  function detect(labels, aliases) {
-    const pats = Object.entries(aliases).map(([slot, ps]) => [slot, ps.map(p => new RegExp(p))]);
-    const found = {};
-    labels.forEach(label => {
-      const n = normalize(label);
-      for (const [slot, ps] of pats) {
-        if (!found[slot] && ps.some(re => re.test(n))) { found[slot] = label; break; }
-      }
-    });
-    return found;
-  }
-
-  window.MaiaEdf = { readEdf, readZip, detect, normalize, parsePatient };
+  window.MaiaEdf = { readEdf, readZip, parsePatient };
 })();

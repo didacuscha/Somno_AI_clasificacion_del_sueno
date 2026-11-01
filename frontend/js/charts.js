@@ -102,7 +102,7 @@
       `revisión completa > ${nf(100 * limit)} %`));
     records.forEach((r, i) => {
       const f = r.review.flagged_fraction, over = r.review.whole_night_recommended;
-      const signed = r.review.status === "signed_off";
+      const signed = r.review.status === "finalized";
       const c = S("circle", { cx: x(f), cy: 46, r: over ? 6.5 : 5.5,
         fill: CV(signed ? "--good" : over ? "--warn" : "--s1"), "fill-opacity": signed ? .9 : .75,
         stroke: CV("--surface-1"), "stroke-width": 2, style: "cursor:pointer" });
@@ -115,7 +115,7 @@
       s.appendChild(c);
     });
     s.appendChild(T({ x: L, y: 96, "class": "axlbl" },
-      "Porcentaje de épocas que el modelo marcó para revisión (confianza bajo el umbral) · verde: revisión finalizada"));
+      "Porcentaje de épocas que el modelo marcó para revisión (confianza bajo el umbral) · verde: revisión finalizada · clic para abrir"));
     el.replaceChildren(s);
   }
 
@@ -126,7 +126,7 @@
     const lo = 0.70, hi = 0.80;
     const x = v => L + ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * pw;
     const s = svg(W, H);
-    s.setAttribute("aria-label", "MF1 de test por combinación de canales");
+    s.setAttribute("aria-label", "F1 macro en el test por combinación de canales");
     [0.70, 0.75, 0.80].forEach(t => {
       s.appendChild(S("line", { x1: x(t), x2: x(t), y1: Tp - 2, y2: Tp + keys.length * rowH,
         stroke: CV(t === goal ? "--warn-text" : "--grid"), "stroke-dasharray": t === goal ? "4 3" : "none" }));
@@ -142,15 +142,15 @@
       const bar = S("rect", { x: L, y: y + 3, width: Math.max(2, x(e.test_mf1) - L), height: 8, rx: 3,
         fill: CV(e.test_mf1 < goal ? "--warn" : "--s1"), "fill-opacity": on ? 1 : .35 });
       bar.addEventListener("mousemove", ev => Tip.show(
-        `<span class="tt">${esc(names[k] || k)}</span>MF1 test <b>${nf(e.test_mf1, 3)}</b> ` +
-        `[${nf(e.test_ci[0], 3)}; ${nf(e.test_ci[1], 3)}]<br>κ ${nf(e.test_kappa, 3)} · F1 N1 ${nf(e.test_f1_n1, 3)}` +
-        `<br>CV MF1 ${nf(e.cv_mf1, 3)}`, ev));
+        `<span class="tt">${esc(names[k] || k)}</span>F1 macro en el test <b>${nf(e.test_mf1, 3)}</b> ` +
+        `(intervalo ${nf(e.test_ci[0], 3)}–${nf(e.test_ci[1], 3)})<br>kappa de Cohen ${nf(e.test_kappa, 3)} · F1 de N1 ${nf(e.test_f1_n1, 3)}` +
+        `<br>en validación cruzada: F1 macro ${nf(e.cv_mf1, 3)}`, ev));
       bar.addEventListener("mouseleave", Tip.hide);
       s.appendChild(bar);
       s.appendChild(T({ x: x(e.test_mf1) + 5, y: y + 10.5, "font-size": 10, fill: CV(on ? "--ink" : "--muted"),
         "font-weight": on ? 700 : 400 }, nf(e.test_mf1, 3)));
     });
-    s.appendChild(T({ x: L, y: H - 2, "class": "axlbl" }, `MF1 en el test (16 sujetos) · línea punteada: meta ${nf(goal, 2)}`));
+    s.appendChild(T({ x: L, y: H - 2, "class": "axlbl" }, `F1 macro en el test (16 sujetos; 1 = perfecto) · línea punteada: meta ${nf(goal, 2)}`));
     el.replaceChildren(s);
   }
 
@@ -159,7 +159,7 @@
     const ep = d.epochs, n = d.night.n_epochs, EP = d.night.epoch_s, T0 = d.night.start_clock_s;
     const stages = view === "predicted" ? ep.stage : ep.final;
     const hasRef = Array.isArray(ep.reference);
-    const W = fitW(el, 360, 1080), L = 46, R = 12, pw = W - L - R;
+    const W = fitW(el, 360, 1080), L = 70, R = 12, pw = W - L - R;
     const rowH = 26, mainTop = 8, mainH = rowH * 5;
     const flagTop = mainTop + mainH + 10, flagH = 10;
     const confTop = flagTop + flagH + 10, confH = 46;
@@ -212,7 +212,7 @@
       s.appendChild(S("rect", { x: x(e), y: flagTop, width: tickW, height: flagH, fill: CV(STATUS[stt].v) }));
     }
     // confianza
-    s.appendChild(T({ x: L - 8, y: confTop + 12, "text-anchor": "end", "class": "tick" }, "conf."));
+    s.appendChild(T({ x: L - 8, y: confTop + 12, "text-anchor": "end", "class": "tick" }, "confianza"));
     const cy = v => confTop + confH - v * confH;
     let area = `M${L} ${cy(0)}`;
     for (let e = 0; e < n; e++) area += `L${x(e + 0.5).toFixed(1)} ${cy(ep.confidence[e]).toFixed(1)}`;
@@ -226,7 +226,7 @@
       "font-weight": 600 }, `umbral ${nf(thr, 2)}`));
     // referencia
     if (hasRef) {
-      s.appendChild(T({ x: L - 8, y: refTop + 11, "text-anchor": "end", "class": "tick" }, "ref."));
+      s.appendChild(T({ x: L - 8, y: refTop + 11, "text-anchor": "end", "class": "tick" }, "experto"));
       let r0 = 0;
       for (let e = 1; e <= n; e++) {
         if (e === n || ep.reference[e] !== ep.reference[r0]) {
@@ -256,10 +256,10 @@
       xh.setAttribute("x1", xx); xh.setAttribute("x2", xx); xh.setAttribute("opacity", 1);
       const stt = epochStatus(d, e, corr);
       Tip.show(`<span class="tt">${T0 != null ? clockHMS(T0 + e * EP) + " · " : ""}época ${e + 1}</span>` +
-        `Modelo: <b>${STG[ep.stage[e]].k}</b> (${Math.round(ep.confidence[e] * 100)} %) · 2.ª ${STG[ep.second[e]].k}` +
+        `Modelo: <b>${STG[ep.stage[e]].k}</b> (confianza ${Math.round(ep.confidence[e] * 100)} %) · 2.ª opción ${STG[ep.second[e]].k}` +
         (stt === "corrected" ? `<br>Final: <b>${STG[ep.final[e]].k}</b> (corregida)` : "") +
         (stt ? `<br>${STATUS[stt].label}` : "") +
-        (hasRef ? `<br>Referencia: ${ep.reference[e] >= 0 ? STG[ep.reference[e]].k : "sin estadio"}` : ""), ev);
+        (hasRef ? `<br>Experto: ${ep.reference[e] >= 0 ? STG[ep.reference[e]].k : "sin estadio"}` : ""), ev);
     });
     capt.addEventListener("mouseleave", () => { xh.setAttribute("opacity", 0); Tip.hide(); });
     capt.addEventListener("click", ev => onSelect && onSelect(epochAt(ev)));
@@ -399,7 +399,7 @@
       const d = this.d, EP = d.night.epoch_s, T0 = d.night.start_clock_s, n = d.night.n_epochs;
       const [t0, t1] = this.range(), dur = t1 - t0;
       const chans = this.channels.length ? this.channels : [];
-      const W = fitW(this.el, 340, 1080), L = 70, R = 8, Tp = 6, pw = W - L - R;
+      const W = fitW(this.el, 340, 1080), L = 76, R = 8, Tp = 6, pw = W - L - R;
       // con pocos canales cada trazo crece; el EMG (envolvente lenta) va siempre en una fila baja
       const slow = slot => (d.channels.fs[slot] || 0) < 10;
       const tall = Math.max(66, Math.min(120, Math.floor(250 / Math.max(1, chans.filter(c => !slow(c)).length))));
@@ -450,10 +450,10 @@
         if (!amp && tr) amp = Math.max(1, ...tr.max.map(Math.abs), ...tr.min.map(Math.abs)) * 1.1;
         amp = (amp || 100) / this.gain;
         s.appendChild(S("line", { x1: L, x2: W - R, y1: mid, y2: mid, stroke: CV("--grid") }));
-        s.appendChild(T({ x: L - 8, y: mid - 2, "text-anchor": "end", "font-size": 11.5, "font-weight": 650,
+        s.appendChild(T({ x: L - 8, y: mid - 2, "text-anchor": "end", "font-size": 12, "font-weight": 650,
           fill: CV(used ? "--ink" : "--muted") }, info.name));
-        s.appendChild(T({ x: L - 8, y: mid + 11, "text-anchor": "end", "font-size": 9.5, fill: CV("--muted") },
-          used ? `±${Math.round(amp)} µV` : "no usado"));
+        s.appendChild(T({ x: L - 8, y: mid + 11, "text-anchor": "end", "font-size": 10.5, fill: CV("--muted") },
+          `±${Math.round(amp)} µV${used ? "" : " · no usado"}`));
         if (tr) {
           const k = tr.min.length, yv = v => mid - (Math.max(-amp, Math.min(amp, v)) / amp) * (h / 2 - 2);
           let p = "M";
@@ -514,6 +514,6 @@
 
   window.MaiaCharts = {
     STG, STATUS, Tip, epochStatus, renderStrip, renderCombos, renderHypnogram, renderStageBars,
-    renderConfusion, renderF1, renderQuality, SignalViewer
+    renderConfusion, renderF1, renderQuality, SignalViewer, SCALE
   };
 })();

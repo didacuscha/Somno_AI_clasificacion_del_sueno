@@ -12,6 +12,9 @@ numpy==1.26.4
 scipy==1.13.1
 mne==1.12.1                 # lectura de EDF/EDF+ y de las anotaciones del hipnograma
 
+# ── catálogo de noches en S3 (SOMNOAI_CATALOG=s3://…) ──
+boto3==1.43.123             # listar y leer las noches de prueba; también lo usa scripts/make_subset_nights.py
+
 # ── modelo provisional (SOMNOAI_MODEL=provisional) ───
 # Estadificador de referencia de código abierto mientras se conecta el endpoint de
 # SageMaker con el stacking del proyecto. Trae sus clasificadores dentro del

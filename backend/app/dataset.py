@@ -5,9 +5,9 @@ hora de apagado de luces) y de la partición del proyecto de grado
 (particiones.json): `split` = test para los 16 sujetos reservados, dev para los
 62 con que se entrenó y validó el modelo.
 
-Sirve para tres cosas: completar la hora de apagado de luces, decir si una noche
-cargada la vio el modelo al entrenar (el resultado sería optimista) y armar la
-lista de noches demo.
+Sirve para completar la hora de apagado de luces y los datos de cada noche del
+catálogo, y para decir si una noche la vio el modelo al entrenar (en ese caso la
+concordancia con la referencia sería optimista).
 """
 import csv
 from functools import lru_cache
@@ -35,20 +35,3 @@ def lookup(file_name: str | None) -> dict | None:
             return {k: r[k] for k in ("id", "subject", "night", "age", "sex", "lights_off",
                                       "psg", "hypnogram", "split")}
     return None
-
-
-def demos() -> list[dict]:
-    """Noches del índice cuyos archivos están en DEMO_DIR (las destacadas primero)."""
-    out = []
-    for r in _rows():
-        psg, hyp = config.DEMO_DIR / r["psg"], config.DEMO_DIR / r["hypnogram"]
-        if not psg.exists():
-            continue
-        out.append({**lookup(r["psg"]), "featured": r["id"] in config.FEATURED_DEMOS,
-                    "has_hypnogram": hyp.exists()})
-    out.sort(key=lambda d: (not d["featured"], d["split"] != "test", d["id"]))
-    return out
-
-
-def demo(demo_id: str) -> dict | None:
-    return next((d for d in demos() if d["id"] == demo_id), None)

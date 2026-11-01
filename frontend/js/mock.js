@@ -2,23 +2,25 @@
    MAIA · backend SIMULADO (modo demo, apiBase = null)
    ────────────────────────────────────────────────────────────────────
    Implementa el mismo contrato que la API (docs/API_CONTRACT.md) dentro
-   del navegador, para trabajar la interfaz sin Python:
-     - los registros y las correcciones se guardan en localStorage;
-     - el análisis «tarda» unos segundos y pasa por los mismos estados;
-     - hipnograma, probabilidades y señal son sintéticos y deterministas
-       (mismo registro → mismos datos).
+   del navegador, para mostrar la interfaz sin Python:
+     - los registros, decisiones y notas se guardan en localStorage;
+     - el análisis «tarda» unos segundos y pasa por los mismos pasos;
+     - hipnograma, probabilidades, señal y evidencia son sintéticos y
+       deterministas (mismo registro → mismos datos).
    Las reglas (umbral, revisión, métricas) son las mismas de la API.
    ════════════════════════════════════════════════════════════════════ */
 (function () {
   "use strict";
 
-  const DB_KEY = "somnoai_v2_db";
+  const DB_KEY = "somnoai_v2_db_2";
   const delay = ms => new Promise(r => setTimeout(r, ms));
   const EP = 30;
   const STAGES = ["W", "N1", "N2", "N3", "REM"];
+  const USER = "Superusuario";
   const p2 = n => String(n).padStart(2, "0");
   const nowISO = (d = new Date()) =>
     `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+  const fail = (code, message) => { throw { code, message }; };
 
   /* misma respuesta que GET /config */
   const CONFIG = {
@@ -34,8 +36,13 @@
       eog: ["^eog(horizontal|horiz|hor|h)?$", "^heog$", "^e1-?e2$", "^loc-?roc$"],
       emg: ["^(emg)?(submental|chin|mentalis)$", "^emg$", "^chinemg$"]
     },
+    channel_kinds: {
+      eeg: ["eeg", "^(fp|af|f|fc|c|cp|p|po|o|t|tp|ft)[0-9z]{1,2}(-?((fp|af|f|fc|c|cp|p|po|o|t|tp|ft)[0-9z]{1,2}|[am][12]|ref|avg))?$"],
+      eog: ["eog", "^(loc|roc|e1|e2)(-?([am][12]|loc|roc|e1|e2))?$"],
+      emg: ["emg", "chin", "submental", "mentalis"]
+    },
     confidence_threshold: 0.65, night_review_fraction: 0.273, mf1_goal: 0.75,
-    window_margin_min: 30, min_window_min: 10, max_upload_mb: 600,
+    window_margin_min: 30, min_window_min: 10, max_upload_mb: 600, max_note_chars: 2000,
     expected: {
       fpz: { cv_mf1: 0.802, test_mf1: 0.772, test_ci: [0.736, 0.802], test_kappa: 0.750, test_f1_n1: 0.518 },
       fpz_emg: { cv_mf1: 0.805, test_mf1: 0.772, test_ci: [0.735, 0.803], test_kappa: 0.747, test_f1_n1: 0.523 },
@@ -50,24 +57,88 @@
       eeg2_eog: { cv_mf1: 0.819, test_mf1: 0.785, test_ci: [0.755, 0.812], test_kappa: 0.759, test_f1_n1: 0.531 },
       eeg2_eog_emg: { cv_mf1: 0.819, test_mf1: 0.784, test_ci: [0.753, 0.810], test_kappa: 0.758, test_f1_n1: 0.534 }
     },
-    model: { kind: "mock", version: "simulado-navegador-1.0" }
+    expected_source: "Modelo del proyecto, Tabla IV del informe (test, 16 sujetos)",
+    model: { kind: "mock", name: "Modelo simulado (navegador)", version: "simulado-navegador-2.0", threshold: 0.65,
+             night_review_fraction: 0.273, expected_source: "Modelo del proyecto, Tabla IV del informe (test, 16 sujetos)" },
+    bands: [
+      { key: "delta", label: "Delta", lo: 0.5, hi: 4 }, { key: "theta", label: "Theta", lo: 4, hi: 8 },
+      { key: "alpha", label: "Alfa", lo: 8, hi: 12 }, { key: "sigma", label: "Sigma (husos)", lo: 12, hi: 15 },
+      { key: "beta", label: "Beta", lo: 15, hi: 30 }
+    ],
+    steps: [{ key: "load", label: "Cargar señales" }, { key: "preprocess", label: "Preprocesar" },
+            { key: "predict", label: "Predecir" }, { key: "flag", label: "Marcar épocas" }, { key: "save", label: "Guardar" }],
+    catalog: { kind: "local", location: "modo demo (navegador)" }
   };
+  const SLOTS = Object.keys(CONFIG.channels);
+
+  /* ── canales: mismas reglas que app/channels.py ── */
+  const norm = l => l.trim().toLowerCase().replace(/[–—]/g, "-").replace(/[\s_.]+/g, "");
+  const RX = (pats, anchored) => pats.map(p => new RegExp(p));
+  const ALIAS = Object.fromEntries(Object.entries(CONFIG.channel_aliases).map(([k, v]) => [k, RX(v)]));
+  const KINDS = Object.fromEntries(Object.entries(CONFIG.channel_kinds).map(([k, v]) => [k, RX(v)]));
+  const matchSlot = l => SLOTS.find(s => ALIAS[s].some(r => r.test(norm(l)))) || null;
+  const kindOf = l => {
+    const s = matchSlot(l);
+    if (s) return CONFIG.channels[s].kind;
+    return Object.keys(KINDS).find(k => KINDS[k].some(r => r.test(norm(l)))) || null;
+  };
+  function inspect(labels, fs) {
+    const sig = labels.filter(l => l !== "EDF Annotations");
+    const matched = {};
+    sig.forEach(l => { const s = matchSlot(l); if (s && !matched[s]) matched[s] = l; });
+    const rows = sig.map(l => ({ label: l, fs: (fs || {})[l] ?? null, kind: kindOf(l),
+                                 match: Object.keys(matched).find(s => matched[s] === l) || null, usable: !!kindOf(l) }));
+    return { channels: rows, matched,
+             candidates: Object.fromEntries(SLOTS.map(s => [s, sig.filter(l => kindOf(l) === CONFIG.channels[s].kind)])),
+             total: sig.length, usable: rows.filter(r => r.usable).length, unused: rows.filter(r => !r.usable).map(r => r.label),
+             has_eeg: rows.some(r => r.kind === "eeg") };
+  }
+  function resolveChannels(selected, cmap, labels) {
+    if (!selected.length) fail("invalid_channels", "Seleccione al menos un canal.");
+    if (!selected.includes("fpz") && !selected.includes("pz")) fail("invalid_channels", "El modelo necesita al menos un EEG: seleccione Fpz-Cz o Pz-Oz.");
+    const det = inspect(labels).matched, out = {};
+    Object.entries(cmap || {}).forEach(([s, l]) => {
+      if (!labels.includes(l)) fail("invalid_channels", `El canal «${l}» no está en el archivo.`);
+      if (kindOf(l) !== CONFIG.channels[s].kind) fail("invalid_channels", `El canal «${l}» no se puede asignar a ${CONFIG.channels[s].label}: el modelo no lo usa.`);
+    });
+    SLOTS.filter(s => selected.includes(s)).forEach(s => {
+      const l = (cmap || {})[s] || det[s];
+      if (!l) fail("invalid_channels", `El archivo no tiene un canal reconocible como ${CONFIG.channels[s].label}.`);
+      if (Object.values(out).includes(l)) fail("invalid_channels", `Un mismo canal del archivo («${l}») no puede ocupar dos entradas del modelo.`);
+      out[s] = l;
+    });
+    return out;
+  }
 
   /* noches demo reales (encabezados y ventana de sueño tomados de los EDF de Sleep-EDFx) */
   const LABELS = ["EEG Fpz-Cz", "EEG Pz-Oz", "EOG horizontal", "Resp oro-nasal", "EMG submental", "Temp rectal", "Event marker"];
   const FS = { "EEG Fpz-Cz": 100, "EEG Pz-Oz": 100, "EOG horizontal": 100, "Resp oro-nasal": 1, "EMG submental": 1, "Temp rectal": 1, "Event marker": 1 };
-  const DETECTED = { fpz: "EEG Fpz-Cz", pz: "EEG Pz-Oz", eog: "EOG horizontal", emg: "EMG submental" };
-  const DEMOS = [
-    { id: "SC4001E0", subject: 0, night: 1, age: 33, sex: "F", lights_off: "00:38", psg: "SC4001E0-PSG.edf",
-      hypnogram: "SC4001EC-Hypnogram.edf", split: "test", featured: true, has_hypnogram: true,
-      header: { labels: LABELS, fs: FS, start_clock_s: 58380, duration_s: 79500 }, detected: DETECTED, window: [961, 1802] },
-    { id: "SC4331F0", subject: 33, night: 1, age: 60, sex: "M", lights_off: "22:58", psg: "SC4331F0-PSG.edf",
-      hypnogram: "SC4331FV-Hypnogram.edf", split: "test", featured: true, has_hypnogram: true,
-      header: { labels: LABELS, fs: FS, start_clock_s: 54900, duration_s: 84300 }, detected: DETECTED, window: [886, 2775] },
-    { id: "SC4601E0", subject: 60, night: 1, age: 89, sex: "F", lights_off: "21:35", psg: "SC4601E0-PSG.edf",
-      hypnogram: "SC4601EC-Hypnogram.edf", split: "test", featured: true, has_hypnogram: true,
-      header: { labels: LABELS, fs: FS, start_clock_s: 57900, duration_s: 81900 }, detected: DETECTED, window: [667, 2016] }
+  const BASE = [
+    { label: "SC4001E0", subject: 0, night: 1, age: 33, sex: "F", lights_off: "00:38", hyp: "SC4001EC-Hypnogram.edf", start: 58380, dur: 79500, window: [961, 1802] },
+    { label: "SC4331F0", subject: 33, night: 1, age: 60, sex: "M", lights_off: "22:58", hyp: "SC4331FV-Hypnogram.edf", start: 54900, dur: 84300, window: [886, 2775] },
+    { label: "SC4601E0", subject: 60, night: 1, age: 89, sex: "F", lights_off: "21:35", hyp: "SC4601EC-Hypnogram.edf", start: 57900, dur: 81900, window: [667, 2016] }
   ];
+  const DROP = { fpz: "EEG Fpz-Cz", pz: "EEG Pz-Oz", eog: "EOG horizontal", emg: "EMG submental" };
+  function night(b, keep) {
+    const labels = keep ? LABELS.filter(l => !Object.values(DROP).includes(l) || keep.some(s => DROP[s] === l)) : LABELS;
+    const combo = keep ? keyFor(keep) : null;
+    const insp = inspect(labels, FS);
+    return {
+      id: keep ? `subsets/${b.label}-${combo}/${b.label}-PSG.edf` : `${b.label}-PSG.edf`, label: b.label, psg: `${b.label}-PSG.edf`,
+      hypnogram: b.hyp, folder: keep ? `subsets/${b.label}-${combo}` : "", subset: !!keep, size_mb: keep ? 22 : 48,
+      subject: b.subject, night: b.night, age: b.age, sex: b.sex, lights_off: b.lights_off, split: "test",
+      featured: !keep, has_hypnogram: true,
+      header: { labels, fs: FS, duration_s: b.dur, start_clock_s: b.start, n_channels: labels.length, patient: { age: b.age, sex: b.sex } },
+      channels: insp, available: SLOTS.filter(s => insp.matched[s]), _window: b.window
+    };
+  }
+  const keyFor = slots => {
+    const s = new Set(slots);
+    return (s.has("fpz") && s.has("pz") ? "eeg2" : s.has("fpz") ? "fpz" : "pz") + (s.has("eog") ? "_eog" : "") + (s.has("emg") ? "_emg" : "");
+  };
+  const nameFor = slots => SLOTS.filter(s => slots.includes(s)).map(s => CONFIG.channels[s].name).join(" + ");
+  const NIGHTS = [...BASE.map(b => night(b)), night(BASE[0], ["pz"]), night(BASE[1], ["fpz", "eog"]), night(BASE[2], ["fpz", "pz", "emg"])];
+  const pub = n => Object.fromEntries(Object.entries(n).filter(([k]) => !k.startsWith("_")));
 
   /* ── azar determinista ── */
   function seedFrom(str) {
@@ -87,7 +158,7 @@
   const pick = (rng, probs) => { let r = rng(), k = 0; while (k < probs.length - 1 && (r -= probs[k]) > 0) k++; return k; };
   const uni = (rng, a, b) => a + rng() * (b - a);
 
-  /* ── noche y predicción sintéticas (mismas reglas que app/model/mock_client.py) ── */
+  /* ── noche y predicción sintéticas (mismas reglas que app/model/mock.py) ── */
   function syntheticNight(rng, n, onset) {
     const s = new Array(n).fill(0);
     const end = Math.min(n - 20, onset + 900 + Math.floor(rng() * 120));
@@ -179,17 +250,18 @@
              confusion: cm };
   }
 
-  function reviewState(ep, corr, signed, frac) {
+  function reviewState(ep, corr, fin, frac) {
     const flagged = ep.review.reduce((a, f, i) => (f ? [...a, i] : a), []);
     const resolved = flagged.filter(i => i in corr);
-    const n = ep.stage.length;
+    const n = ep.stage.length, whole = flagged.length / n > frac;
+    const ent = Object.entries(corr);
     return {
-      status: signed.by ? "signed_off" : Object.keys(corr).length ? "in_progress" : "pending",
-      n_epochs: n, flagged: flagged.length, flagged_fraction: r3(flagged.length / n * 10) / 10,
-      whole_night_recommended: flagged.length / n > frac, resolved: resolved.length, pending: flagged.length - resolved.length,
-      confirmed: resolved.filter(i => corr[i].stage === ep.stage[i]).length,
-      corrected: Object.entries(corr).filter(([i, c]) => c.stage !== ep.stage[+i]).length,
-      signed_off_by: signed.by || null, signed_off_at: signed.at || null
+      status: fin.by ? "finalized" : ent.length ? "in_review" : whole ? "full_review_suggested" : "to_review",
+      n_epochs: n, flagged: flagged.length, flagged_fraction: Math.round(flagged.length / n * 10000) / 10000,
+      whole_night_recommended: whole, resolved: resolved.length, pending: flagged.length - resolved.length,
+      confirmed: ent.filter(([i, c]) => c.stage === ep.stage[+i]).length,
+      corrected: ent.filter(([i, c]) => c.stage !== ep.stage[+i]).length,
+      finalized_by: fin.by || null, finalized_at: fin.at || null
     };
   }
 
@@ -201,20 +273,14 @@
     if (!_db) {
       _db = { records: [] };
       const t = Date.now();
-      [["SC4001E0", ["fpz", "pz", "eog", "emg"], 50], ["SC4331F0", ["fpz", "eog"], 30], ["SC4601E0", ["pz"], 10]]
-        .forEach(([id, ch, minAgo], k) => newRecord(demoSpec(DEMOS.find(d => d.id === id), ch, "reference", null, null, undefined),
-          "Sistema", new Date(t - minAgo * 60000), "seed" + k));
+      [[NIGHTS[0], ["fpz", "pz", "eog", "emg"], 50], [NIGHTS[1], ["fpz", "eog"], 30], [NIGHTS[2], ["pz"], 10]]
+        .forEach(([n, ch], k) => newRecord(specFor(n, ch, "reference", null, null, undefined), "Sistema", new Date(t - (50 - 10 * k) * 60000), "seed" + k));
       save();
     }
     return _db;
   }
   function save() { try { localStorage.setItem(DB_KEY, JSON.stringify(_db)); } catch (e) { /* modo efímero */ } }
 
-  const keyFor = slots => {
-    const s = new Set(slots);
-    return (s.has("fpz") && s.has("pz") ? "eeg2" : s.has("fpz") ? "fpz" : "pz") + (s.has("eog") ? "_eog" : "") + (s.has("emg") ? "_emg" : "");
-  };
-  const nameFor = slots => Object.keys(CONFIG.channels).filter(s => slots.includes(s)).map(s => CONFIG.channels[s].name).join(" + ");
   const offset = (clock, startClock) => {
     const [h, m] = clock.split(":").map(Number);
     return (((h * 3600 + m * 60) - startClock) % 86400 + 86400) % 86400;
@@ -223,46 +289,41 @@
   function resolveWindow(mode, header, refWindow, startClock, endClock) {
     const total = Math.floor(header.duration_s / EP);
     if (mode === "reference") {
-      if (!refWindow) throw { code: "invalid_file", message: "La ventana del hipnograma necesita el hipnograma de referencia." };
+      if (!refWindow) fail("invalid_file", "La ventana del hipnograma necesita el hipnograma de referencia.");
       return refWindow;
     }
     if (mode === "range") {
-      if (!startClock || !endClock) throw { code: "invalid_file", message: "Indique la hora de inicio y la de fin del análisis." };
+      if (!startClock || !endClock) fail("invalid_file", "Indique la hora de inicio y la de fin del análisis.");
       const s0 = offset(startClock, header.start_clock_s);
       let s1 = offset(endClock, header.start_clock_s);
       if (s1 <= s0) s1 += 86400;
-      if (s0 >= header.duration_s) throw { code: "invalid_file", message: `La hora de inicio ${startClock} queda fuera del registro.` };
+      if (s0 >= header.duration_s) fail("invalid_file", `La hora de inicio ${startClock} queda fuera del registro.`);
       const w = [Math.floor(s0 / EP), Math.min(Math.floor(s1 / EP), total)];
-      if (w[1] - w[0] < 20) throw { code: "invalid_file", message: "La ventana de análisis es demasiado corta: el mínimo son 10 minutos." };
+      if (w[1] - w[0] < 20) fail("invalid_file", "La ventana de análisis es demasiado corta: el mínimo son 10 minutos.");
       return w;
     }
     return [0, total];
   }
 
-  function validateChannels(channels, available) {
-    if (!channels.length || !(channels.includes("fpz") || channels.includes("pz"))) {
-      throw { code: "invalid_channels", message: "El modelo necesita al menos un EEG: seleccione Fpz-Cz o Pz-Oz." };
-    }
-    const missing = channels.filter(c => !available[c]);
-    if (missing.length) throw { code: "invalid_channels", message: `El archivo no tiene ${missing.map(c => CONFIG.channels[c].label).join(", ")}.` };
-  }
-
-  function demoSpec(d, channels, mode, startClock, endClock, lightsOff) {
-    const w = resolveWindow(mode || "reference", d.header, d.window, startClock, endClock);
-    const lo = lightsOff === undefined || lightsOff === null ? d.lights_off : (lightsOff === "none" ? null : lightsOff);
-    return { source: "demo", file_name: d.psg, header: d.header, channels, available: d.detected, window: w,
-             mode: mode || "reference", has_ref: true, lights_off: lo, lights_off_source: lo ? (lo === d.lights_off ? "dataset-index" : "manual") : null,
-             dataset: { id: d.id, subject: d.subject, night: d.night, age: d.age, sex: d.sex, lights_off: d.lights_off, split: d.split },
-             sex: d.sex, age: d.age, size_mb: 48 };
+  function specFor(n, channels, mode, startClock, endClock, lightsOff, cmap) {
+    const map = resolveChannels(channels, cmap, n.header.labels);
+    const w = resolveWindow(mode || "reference", n.header, n._window, startClock, endClock);
+    const lo = lightsOff === undefined || lightsOff === null ? n.lights_off : (lightsOff === "none" ? null : lightsOff);
+    return { source: "catalog", source_id: n.id, label: n.label, subset: n.subset, file_name: n.psg, header: n.header, channels: SLOTS.filter(s => map[s]),
+             map, available: n.channels.matched, window: w, mode: mode || "reference", has_ref: true, lights_off: lo,
+             lights_off_source: lo ? (lo === n.lights_off ? "dataset-index" : "manual") : null,
+             dataset: { id: n.label, subject: n.subject, night: n.night, age: n.age, sex: n.sex, lights_off: n.lights_off, split: n.split },
+             sex: n.sex, age: n.age, size_mb: n.size_mb, unused: n.channels.unused };
   }
 
   function newRecord(spec, author, at = new Date(), salt = "") {
     const id = (spec.file_name.replace(/\.(edf|zip)$/i, "").slice(0, 8) + "-" + (at.getTime() + salt).toString(36)).toLowerCase();
     const m = /^SC4(\d\d)\d/i.exec(spec.file_name);
     const rec = {
-      id, created_at: nowISO(at), spec, corrections: {}, history: [], signed: {},
+      id, created_at: nowISO(at), started: at.getTime(), spec, corrections: {}, history: [], notes: [], finalized: {},
       summary: {
-        id, created_at: nowISO(at), created_by: author, source: spec.source, file_name: spec.file_name,
+        id, created_at: nowISO(at), created_by: author, source: spec.source, source_id: spec.source_id, night_label: spec.label,
+        subset: !!spec.subset, file_name: spec.file_name,
         subject_code: m ? "SC" + m[1] : spec.file_name.slice(0, 8).toUpperCase(), sex: spec.sex || null, age: spec.age || null,
         channels: spec.channels, combination: keyFor(spec.channels), combination_name: nameFor(spec.channels),
         window_mode: spec.mode, n_epochs: spec.window[1] - spec.window[0], has_reference: spec.has_ref,
@@ -274,15 +335,18 @@
     return rec;
   }
 
-  /* ── estado del análisis según el tiempo transcurrido (simula el trabajo en segundo plano) ── */
-  const STEPS = [[1200, "queued", "En cola"], [2400, "reading", "Leyendo el registro"],
-                 [4600, "staging", "Estadificando con simulado-navegador-1.0"], [5600, "metrics", "Calculando métricas"]];
-  function statusOf(rec) {
-    const el = Date.now() - new Date(rec.created_at).getTime();
-    for (const [ms, step, message] of STEPS) {
-      if (el < ms) return { status: step === "queued" ? "queued" : "running", progress: { step, label: message, message } };
-    }
-    return { status: "done", progress: null };
+  /* ── pasos del análisis según el tiempo transcurrido (simula el trabajo en segundo plano) ── */
+  const TIMES = [700, 1700, 2300, 4300, 4900, 5300];       // fin de: cola, load, preprocess, predict, flag, save
+  const MSG = { load: "Leyendo el EDF", predict: "Estadificando con " + CONFIG.model.name };
+  function progressOf(rec) {
+    const el = Date.now() - (rec.started || new Date(rec.created_at).getTime());
+    const steps = CONFIG.steps.map((s, k) => {
+      const status = el >= TIMES[k + 1] ? "done" : el >= TIMES[k] ? "running" : "pending";
+      return { ...s, status, message: status === "running" ? (MSG[s.key] || null) : null,
+               seconds: status === "done" ? (TIMES[k + 1] - TIMES[k]) / 1000 : null };
+    });
+    const status = el < TIMES[0] ? "queued" : el < TIMES[5] ? "running" : "done";
+    return { status, progress: { current: (steps.find(s => s.status === "running") || {}).key || null, steps } };
   }
 
   const cache = new Map();
@@ -302,12 +366,10 @@
       ...rec.summary, status: "done", finished_at: rec.created_at,
       patient: { age: sp.age || null, sex: sp.sex || null, source: sp.age ? "edf-header" : null },
       channels: { selected: sp.channels, combination: combo, combination_name: nameFor(sp.channels),
-                  mask: Object.keys(CONFIG.channels).map(s => sp.channels.includes(s)),
-                  map: Object.fromEntries(sp.channels.map(s => [s, sp.available[s]])), available: sp.available,
-                  file_labels: sp.header.labels, fs: Object.fromEntries(Object.entries(sp.available).map(([s, l]) => [s, sp.header.fs[l] || 100])) },
-      model: { version: CONFIG.model.version, kind: "mock", threshold: CONFIG.confidence_threshold,
-               night_review_fraction: CONFIG.night_review_fraction,
-               notes: ["Resultados simulados en el navegador (modo demo): no provienen de ningún modelo."],
+                  mask: SLOTS.map(s => sp.channels.includes(s)), map: sp.map, available: sp.available,
+                  file_labels: sp.header.labels, unused: sp.unused || [],
+                  fs: Object.fromEntries(Object.entries(sp.available).map(([s, l]) => [s, sp.header.fs[l] || 100])) },
+      model: { ...CONFIG.model, notes: ["Resultados simulados en el navegador (modo demo): no provienen de ningún modelo."],
                expected: { ...ex, below_goal: ex.test_mf1 < CONFIG.mf1_goal, goal_mf1: CONFIG.mf1_goal } },
       night: { epoch_s: EP, n_epochs: n, start_epoch: sp.window[0],
                start_clock_s: sp.header.start_clock_s != null ? sp.header.start_clock_s + sp.window[0] * EP : null,
@@ -322,9 +384,10 @@
         composition: [{ label: "Antes de la ventana", hours: bh, kind: "outside" }, { label: "Ventana analizada", hours: wh, kind: "window" },
                       { label: "Después de la ventana", hours: totalH - bh - wh, kind: "outside" }].filter(s => s.hours > 0.01),
         reference_unscored: ep.reference ? ep.reference.filter(v => v < 0).length : null,
-        timings: { read_s: 0.4, model_s: 2.2, total_s: 2.9 }
+        timings: { read_s: 1.0, model_s: 2.0, total_s: 3.6 }
       },
-      dataset: sp.dataset || null
+      dataset: sp.dataset || null,
+      source_info: { type: sp.source, id: sp.source_id, label: sp.label, subset: !!sp.subset, location: CONFIG.catalog.location }
     };
     cache.set(rec.id, d);
     return d;
@@ -337,21 +400,19 @@
       final, metrics_final: architecture(final, d.night.lights_off_epoch),
       agreement_final: d.epochs.reference ? agreement(final, d.epochs.reference) : null,
       corrections: Object.entries(corr).map(([e, c]) => ({ epoch: +e, ...c })).sort((a, b) => a.epoch - b.epoch),
-      review: reviewState(d.epochs, corr, rec.signed, d.model.night_review_fraction),
-      history: rec.history.slice(0, 100)
+      review: reviewState(d.epochs, corr, rec.finalized, d.model.night_review_fraction),
+      history: rec.history.slice(0, 200), notes: rec.notes
     };
   }
 
-  const find = id => {
-    const rec = db().records.find(r => r.id === id);
-    if (!rec) throw { code: "not_found", message: "El registro no existe." };
-    return rec;
-  };
+  const find = id => db().records.find(r => r.id === id) || fail("not_found", "El registro no existe.");
 
   function summaryOf(rec) {
-    const st = statusOf(rec);
-    return { ...rec.summary, ...st, error: null, review: st.status === "done" ? dynamic(rec).review : null };
+    const st = progressOf(rec);
+    return { ...rec.summary, ...st, error: null, attempts: 1, review: st.status === "done" ? dynamic(rec).review : null };
   }
+  const log = (rec, action, extra = {}) =>
+    rec.history.unshift({ at: nowISO(), author: USER, action, epoch: null, stage: null, previous: null, old: null, new: null, ...extra });
 
   /* ── señal sintética por estadio y modalidad ── */
   function sigAt(slot, st, t) {
@@ -374,6 +435,9 @@
     if (st === 3) return (0.5 + 0.5 * sin(0.055)) * (48 * sin(1.05) + 21 * sin(2.3, 1.1)) + 13 * r(69.9);
     return 15 * sin(6.4) + 9 * sin(9.1) + 13 * r(61.3);
   }
+  /* perfil espectral típico por estadio (delta, theta, alfa, sigma, beta) */
+  const PROFILE = [[0.62, 0.12, 0.14, 0.04, 0.08], [0.66, 0.2, 0.07, 0.03, 0.04], [0.8, 0.11, 0.03, 0.04, 0.02],
+                   [0.93, 0.05, 0.01, 0.005, 0.005], [0.7, 0.2, 0.05, 0.02, 0.03]];
 
   function csvDownload(text, name) {
     const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
@@ -382,69 +446,98 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  const uploads = new Map();
+
   /* ══════════════ interfaz pública (misma forma que la API real) ══════════════ */
   window.MaiaMock = {
     async login(username, password) {
       await delay(380);
       if (username === "superusuario" && password === "somnoai2026") {
-        return { token: "demo-token", user: { username, name: "Superusuario", initials: "SU" } };
+        return { token: "demo-token", user: { username, name: USER, initials: "SU" } };
       }
-      throw { code: "invalid_credentials", message: "Usuario o contraseña incorrectos." };
+      fail("invalid_credentials", "Usuario o contraseña incorrectos.");
     },
     async getConfig() { await delay(60); return CONFIG; },
-    async listDemos() { await delay(120); return { demos: DEMOS }; },
-    async lookupNight(fileName) {
-      const d = DEMOS.find(x => x.psg.slice(0, 6) === fileName.slice(0, 6).toUpperCase());
-      return { night: d ? { id: d.id, subject: d.subject, night: d.night, age: d.age, sex: d.sex,
-        lights_off: d.lights_off, psg: d.psg, hypnogram: d.hypnogram, split: d.split } : null };
-    },
+    async listCatalog() { await delay(200); return { source: CONFIG.catalog, nights: NIGHTS.map(pub) }; },
 
-    async createDemoAnalysis({ demoId, channels, windowMode, startClock, endClock, lightsOff }) {
-      await delay(250);
-      const d = DEMOS.find(x => x.id === demoId);
-      if (!d) throw { code: "not_found", message: "Registro demo desconocido." };
-      validateChannels(channels, d.detected);
-      return summaryOf(newRecord(demoSpec(d, channels, windowMode, startClock, endClock, lightsOff), "Superusuario"));
-    },
-
-    async createAnalysis({ file, hypnogram, channels, channelMap, windowMode, startClock, endClock, lightsOff }) {
+    async uploadPsg(file, hypnogram) {
       await delay(500);
-      let header = null, name = file.name;
+      let header = null, name = file.name, zipHyp = null;
       if (/\.zip$/i.test(file.name)) {
         const z = await MaiaEdf.readZip(file);
-        if (z && z.psg) { header = z.psg.header; name = z.psg.name; if (z.hypnogram) hypnogram = hypnogram || true; }
+        if (!z || !z.psg) fail("invalid_file", "El .zip no contiene ningún .edf de PSG (la señal del registro).");
+        header = z.psg.header; name = z.psg.name; zipHyp = z.hypnogram ? z.hypnogram.name : null;
       } else header = await MaiaEdf.readEdf(file);
-      if (!header || !header.durationS) throw { code: "invalid_file", message: "El modo demo no pudo leer el encabezado del archivo." };
-      const available = { ...MaiaEdf.detect(header.labels, CONFIG.channel_aliases), ...(channelMap || {}) };
-      validateChannels(channels, available);
-      const h = { labels: header.labels, fs: header.fs, start_clock_s: header.startClockS, duration_s: header.durationS };
-      const total = Math.floor(h.duration_s / EP);
-      const refWindow = hypnogram ? [Math.min(total - 40, 40), Math.min(total, 40 + 1000)] : null;
-      const w = resolveWindow(windowMode || (refWindow ? "reference" : "full"), h, refWindow, startClock, endClock);
-      const lo = lightsOff && lightsOff !== "none" ? lightsOff : null;
-      return summaryOf(newRecord({
-        source: "upload", file_name: name, header: h, channels, available, window: w, mode: windowMode || "full",
-        has_ref: !!hypnogram, lights_off: lo, lights_off_source: lo ? "manual" : null, dataset: null,
-        sex: header.patient.sex, age: header.patient.age, size_mb: Math.round(file.size / 104857.6) / 10
-      }, "Superusuario"));
+      if (!header) fail("invalid_file", `«${name}» no es un EDF legible: el encabezado no tiene el formato EDF/EDF+.`);
+      if (header.annotationsOnly) fail("invalid_file", `«${name}» es solo un hipnograma (anotaciones, sin señal).`);
+      const insp = inspect(header.labels, header.fs);
+      if (!insp.usable) fail("invalid_file", `«${name}» no tiene ninguno de los canales que usa el modelo. Canales del archivo: ${header.labels.join(", ")}.`);
+      if (!insp.has_eeg) fail("invalid_file", `«${name}» no tiene ningún canal de EEG y el modelo necesita al menos uno.`);
+      const id = Math.random().toString(16).slice(2, 18).padEnd(16, "0");
+      const up = { id, file_name: name, size_mb: Math.round(file.size / 104857.6) / 10,
+                   header: { labels: header.labels, fs: header.fs, duration_s: header.durationS, start_clock_s: header.startClockS,
+                             n_channels: header.nChannels, patient: header.patient },
+                   channels: insp, hypnogram: hypnogram ? { name: hypnogram.name } : zipHyp ? { name: zipHyp } : null,
+                   dataset: (await this.lookupNight(name)).night };
+      uploads.set(id, up);
+      return up;
     },
+    async attachHypnogram(id, file) {
+      await delay(200);
+      const up = uploads.get(id) || fail("not_found", "La carga no existe.");
+      const h = await MaiaEdf.readEdf(file);
+      if (!h || !h.annotationsOnly) fail("invalid_file", `«${file.name}» no parece un hipnograma: debe ser un EDF+ que solo trae anotaciones de estadios.`);
+      up.hypnogram = { name: file.name };
+      return up;
+    },
+    async removeHypnogram(id) { const up = uploads.get(id) || fail("not_found", "La carga no existe."); up.hypnogram = null; return up; },
+    async deleteUpload(id) { uploads.delete(id); return { deleted: id }; },
+    async lookupNight(fileName) {
+      const b = BASE.find(x => x.label.slice(0, 6) === fileName.slice(0, 6).toUpperCase());
+      return { night: b ? { id: b.label, subject: b.subject, night: b.night, age: b.age, sex: b.sex, lights_off: b.lights_off, split: "test" } : null };
+    },
+
+    async createAnalysis(body) {
+      await delay(250);
+      const { source, channels, channel_map, window_mode, start_clock, end_clock, lights_off } = body;
+      let spec;
+      if (source.type === "catalog") {
+        const n = NIGHTS.find(x => x.id === source.id) || fail("not_found", `La noche «${source.id}» no está en el catálogo.`);
+        spec = specFor(n, channels, window_mode, start_clock, end_clock, lights_off, channel_map);
+      } else {
+        const up = uploads.get(source.id) || fail("not_found", "La carga no existe o ya se borró: suba el archivo de nuevo.");
+        const map = resolveChannels(channels, channel_map, up.header.labels);
+        const h = up.header, total = Math.floor(h.duration_s / EP);
+        const refWindow = up.hypnogram ? [Math.min(total - 40, 40), Math.min(total, 40 + 1000)] : null;
+        const mode = window_mode || (refWindow ? "reference" : "full");
+        const w = resolveWindow(mode, h, refWindow, start_clock, end_clock);
+        const lo = lights_off && lights_off !== "none" ? lights_off : null;
+        spec = { source: "upload", source_id: up.id, label: up.file_name.replace(/\.edf$/i, ""), file_name: up.file_name, header: h,
+                 channels: SLOTS.filter(s => map[s]), map, available: { ...up.channels.matched, ...map }, window: w, mode,
+                 has_ref: !!up.hypnogram, lights_off: lo, lights_off_source: lo ? "manual" : null, dataset: up.dataset,
+                 sex: h.patient.sex, age: h.patient.age, size_mb: up.size_mb, unused: up.channels.unused };
+        uploads.delete(up.id);
+      }
+      return summaryOf(newRecord(spec, USER));
+    },
+    async retry() { await delay(100); fail("not_failed", "Solo se puede reintentar un análisis que falló."); },
 
     async listRecords() { await delay(150); return { records: db().records.map(summaryOf) }; },
 
     async getRecord(id) {
-      await delay(160);
-      const rec = find(id), st = statusOf(rec);
+      await delay(140);
+      const rec = find(id), st = progressOf(rec);
       if (st.status !== "done") return summaryOf(rec);
       const d = base(rec), dyn = dynamic(rec);
-      return { ...d, epochs: { ...d.epochs, final: dyn.final }, metrics: { ...d.metrics, final: dyn.metrics_final },
+      return { ...d, ...st, attempts: 1, epochs: { ...d.epochs, final: dyn.final }, metrics: { ...d.metrics, final: dyn.metrics_final },
                agreement: d.agreement ? { ...d.agreement, final: dyn.agreement_final } : null,
-               corrections: dyn.corrections, review: dyn.review, history: dyn.history };
+               corrections: dyn.corrections, review: dyn.review, history: dyn.history, notes: dyn.notes };
     },
 
     async deleteRecord(id) {
       await delay(200);
       const recs = db().records, i = recs.findIndex(r => r.id === id);
-      if (i < 0) throw { code: "not_found", message: "El registro no existe." };
+      if (i < 0) fail("not_found", "El registro no existe.");
       recs.splice(i, 1);
       cache.delete(id);
       save();
@@ -475,28 +568,80 @@
       return { start_s: startS, duration_s: durationS, points, unit: "µV", traces };
     },
 
+    async getEvidence(id, epoch, channel) {
+      await delay(180);
+      const rec = find(id), d = base(rec), fin = dynamic(rec).final;
+      const eeg = Object.keys(d.channels.available).filter(s => CONFIG.channels[s].kind === "eeg");
+      const ch = channel || d.channels.selected.find(s => eeg.includes(s)) || eeg[0];
+      const rng = mulberry32(seedFrom(`${id}|${epoch}|${ch}`));
+      const prof = PROFILE[fin[epoch]].map(v => v * uni(rng, 0.8, 1.25));
+      const sum = prof.reduce((a, b) => a + b, 0);
+      const typical = {};
+      STAGES.forEach((s, k) => { if (fin.some(x => x === k)) typical[s] = { n: fin.filter(x => x === k).length, values: PROFILE[k] }; });
+      const cands = [d.epochs.stage[epoch], d.epochs.second[epoch]];
+      const dist = c => typical[STAGES[c]] ? Math.hypot(...prof.map((v, j) => Math.log(v / sum) - Math.log(PROFILE[c][j]))) : Infinity;
+      return { epoch, channel: ch, channel_name: CONFIG.channels[ch].name, file_label: d.channels.available[ch], channels: eeg, fs: 100,
+               bands: CONFIG.bands.map((b, j) => ({ ...b, value: Math.round(prof[j] / sum * 10000) / 10000 })),
+               typical, candidates: cands, closest: dist(cands[0]) <= dist(cands[1]) ? cands[0] : cands[1],
+               method: "Potencia relativa del EEG por banda (simulada en el modo demo)." };
+    },
+
     async changeEpochs(id, changes) {
       await delay(90);
       const rec = find(id), d = base(rec);
-      if (rec.signed.by) throw { code: "review_locked", message: "La revisión está finalizada. Reábrala para hacer cambios." };
+      if (rec.finalized.by) fail("review_locked", "La revisión está finalizada. Reábrala para hacer cambios.");
       const at = nowISO();
       changes.forEach(({ epoch, stage }) => {
-        const prev = epoch in rec.corrections ? rec.corrections[epoch].stage : d.epochs.stage[epoch];
+        const model = d.epochs.stage[epoch];
+        const prev = epoch in rec.corrections ? rec.corrections[epoch].stage : model;
+        if (stage == null && !(epoch in rec.corrections)) return;
         if (stage == null) delete rec.corrections[epoch];
-        else rec.corrections[epoch] = { stage, author: "Superusuario", at };
-        rec.history.unshift({ at, author: "Superusuario", action: stage == null ? "clear" : "set", epoch, stage, previous: prev });
+        else rec.corrections[epoch] = { stage, author: USER, at };
+        rec.history.unshift({ at, author: USER, action: stage == null ? "clear" : "set", epoch, stage, previous: prev,
+                              old: STAGES[prev], new: STAGES[stage == null ? model : stage] });
       });
       save();
       return dynamic(rec);
     },
 
-    async reviewAction(id, action) {
+    async getChanges(id) {
+      await delay(120);
+      const rec = find(id), d = base(rec), ep = d.epochs, t0 = d.night.start_clock_s;
+      const entries = Object.entries(rec.corrections).map(([e, c]) => [+e, c]).sort((a, b) => a[0] - b[0]);
+      const changes = entries.filter(([e, c]) => c.stage !== ep.stage[e]).map(([e, c]) => ({
+        epoch: e, clock_s: t0 != null ? t0 + e * EP : null, model_stage: ep.stage[e], reviewer_stage: c.stage,
+        flagged: !!ep.review[e], author: c.author, at: c.at }));
+      return { confirmed: entries.length - changes.length, corrected: changes.length,
+               pending: ep.review.filter((f, i) => f && !(i in rec.corrections)).length, changes, review: dynamic(rec).review };
+    },
+
+    async reviewAction(id, { action, expected_corrected }) {
       await delay(150);
-      const rec = find(id);
-      rec.signed = action === "sign_off" ? { by: "Superusuario", at: nowISO() } : {};
-      rec.history.unshift({ at: nowISO(), author: "Superusuario", action, epoch: null, stage: null, previous: null });
+      const rec = find(id), before = dynamic(rec).review;
+      if (action === "finalize") {
+        if (rec.finalized.by) fail("already_finalized", "La revisión ya está finalizada.");
+        if (expected_corrected != null && expected_corrected !== before.corrected) {
+          fail("stale_summary", `Los cambios cambiaron mientras veía el resumen (ahora son ${before.corrected}).`);
+        }
+        rec.finalized = { by: USER, at: nowISO() };
+      } else {
+        if (!rec.finalized.by) fail("not_finalized", "La revisión no está finalizada.");
+        rec.finalized = {};
+      }
+      log(rec, action, { old: before.status, new: dynamic(rec).review.status });
       save();
       return dynamic(rec);
+    },
+
+    async addNote(id, text) {
+      await delay(120);
+      const rec = find(id), t = (text || "").trim();
+      if (!t) fail("empty_note", "Escriba la nota antes de guardarla.");
+      const at = nowISO();
+      rec.notes.unshift({ id: Date.now(), at, author: USER, text: t });
+      log(rec, "note", { new: t });
+      save();
+      return { notes: rec.notes, history: rec.history.slice(0, 200) };
     },
 
     async download(path, fallbackName) {

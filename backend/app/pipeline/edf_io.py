@@ -1,10 +1,19 @@
-"""Lectura de archivos PSG (.edf) y paquetes .zip (PSG + hipnograma opcional)."""
+"""Lectura de archivos PSG (.edf) y paquetes .zip (PSG + hipnograma opcional).
+
+- `parse_header` lee el encabezado desde bytes: sirve igual para un archivo local
+  que para los primeros KB de un objeto de S3 (lectura por rango).
+- `read_window` entrega la señal de la ventana de cada canal a su frecuencia nativa
+  (lo que recibe el modelo); `to_common_rate` la lleva a una sola frecuencia (visor).
+- `subset_edf` copia un EDF con solo algunos canales, byte a byte (sin recuantizar).
+"""
 import re
 import zipfile
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+
+HEADER_PROBE = 256 * 33          # encabezado completo de un EDF con hasta 32 canales
 
 
 class InvalidFile(Exception):
@@ -47,30 +56,42 @@ def _parse_patient(patient: str) -> dict:
     return {"age": age, "sex": sex}
 
 
-def read_header(path: str) -> dict:
-    """Encabezado EDF/EDF+ sin cargar la señal: canales, frecuencias, inicio y duración."""
+def header_size(head: bytes) -> int:
+    """Bytes del encabezado completo a partir de los primeros 256 (o 0 si no es EDF)."""
     try:
-        with open(path, "rb") as fh:
-            head = fh.read(256)
-            if len(head) < 256 or _field(head[0:8]) != "0":
-                raise InvalidFile("El archivo no es un EDF válido (encabezado ilegible).")
-            ns = int(_field(head[252:256]))
-            sig = fh.read(ns * 256)
+        if len(head) < 256 or _field(head[0:8]) != "0":
+            return 0
+        ns = int(_field(head[252:256]))
+    except ValueError:
+        return 0
+    return 256 + ns * 256 if 0 < ns < 1000 else 0
+
+
+def parse_header(raw: bytes, file_size: int | None = None) -> dict:
+    """Encabezado EDF/EDF+ sin la señal: canales, frecuencias, inicio y duración."""
+    size = header_size(raw[:256])
+    if not size:
+        raise InvalidFile("El archivo no es un EDF válido (encabezado ilegible).")
+    if len(raw) < size:
+        raise InvalidFile("El archivo EDF está incompleto o no declara canales.")
+    head, ns = raw[:256], (size - 256) // 256
+    sig = raw[256:size]
+    try:
         n_records = int(_field(head[236:244]))
         rec_dur = float(_field(head[244:252]) or 0)
-    except (ValueError, OSError) as e:
+    except ValueError as e:
         raise InvalidFile("El archivo no es un EDF válido (encabezado ilegible).") from e
-    if ns <= 0 or len(sig) < ns * 256:
-        raise InvalidFile("El archivo EDF está incompleto o no declara canales.")
 
     col = lambda off, width: [_field(sig[off + i * width: off + (i + 1) * width]) for i in range(ns)]  # noqa: E731
     labels = col(0, 16)
     units = col(ns * 96, 8)
-    spr = [int(float(v or 0)) for v in col(ns * 216, 8)]          # muestras por registro de datos
-    if n_records < 0:                                               # desconocido: se deduce del tamaño
-        header_bytes = 256 + ns * 256
-        n_records = max(0, (Path(path).stat().st_size - header_bytes) // (2 * max(sum(spr), 1)))
-    duration_s = n_records * rec_dur
+    try:
+        spr = [int(float(v or 0)) for v in col(ns * 216, 8)]      # muestras por registro de datos
+    except ValueError as e:
+        raise InvalidFile("El archivo no es un EDF válido (encabezado ilegible).") from e
+    if n_records < 0 and file_size:                                 # desconocido: se deduce del tamaño
+        n_records = max(0, (file_size - size) // (2 * max(sum(spr), 1)))
+    duration_s = max(n_records, 0) * rec_dur
 
     start = start_clock_s = None
     try:
@@ -95,13 +116,24 @@ def read_header(path: str) -> dict:
     }
 
 
-def load_signals(path: str, labels: list[str], start_s: float, end_s: float) -> tuple[dict[str, np.ndarray], float]:
-    """Señal en µV de los canales pedidos entre start_s y end_s (segundos desde el inicio),
-    toda a la frecuencia del canal más rápido.
+def read_header(path: str) -> dict:
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read(HEADER_PROBE)
+            size = header_size(raw[:256])
+            if size > len(raw):
+                raw += fh.read(size - len(raw))
+    except OSError as e:
+        raise InvalidFile("No se pudo leer el archivo.") from e
+    return parse_header(raw, Path(path).stat().st_size)
+
+
+def read_window(path: str, labels: list[str], start_s: float, end_s: float) -> dict[str, tuple[np.ndarray, float]]:
+    """Señal en µV de cada canal pedido entre start_s y end_s (segundos desde el inicio),
+    a su frecuencia nativa → {etiqueta: (señal, frecuencia)}.
 
     Los canales se leen agrupados por frecuencia: MNE avisa de artefactos en los bordes
-    si mezcla frecuencias sin precargar el archivo completo (22 h). Los lentos (el EMG de
-    1 Hz de Sleep-EDFx) se repiten hasta la frecuencia mayor, como hace MNE al precargar.
+    si mezcla frecuencias sin precargar el archivo completo (22 h).
     """
     import mne  # import diferido: el arranque de la API no lo necesita
 
@@ -109,23 +141,81 @@ def load_signals(path: str, labels: list[str], start_s: float, end_s: float) -> 
     groups: dict[float, list[str]] = {}
     for lab in dict.fromkeys(labels):
         groups.setdefault(fs.get(lab, 0.0), []).append(lab)
-    top = max(groups)
-    out: dict[str, np.ndarray] = {}
+    out: dict[str, tuple[np.ndarray, float]] = {}
     for rate, group in groups.items():
+        if rate <= 0:
+            raise InvalidFile(f"El canal «{group[0]}» no declara su frecuencia de muestreo.")
         try:
             raw = mne.io.read_raw_edf(path, include=group, preload=False, verbose="ERROR")
         except Exception as e:
             raise InvalidFile(f"No se pudo leer el EDF: {e}") from e
         sfreq = float(raw.info["sfreq"])
         stop = min(end_s, raw.n_times / sfreq)
+        if stop <= start_s:
+            raise InvalidFile("La ventana de análisis queda fuera de la señal del archivo.")
         raw.crop(tmin=start_s, tmax=stop - 1.0 / sfreq, include_tmax=True)
         data = raw.get_data(picks=group, units="uV")
         for i, lab in enumerate(group):
-            x = data[i]
-            if rate != top:
-                factor = top / sfreq
-                x = (np.repeat(x, int(factor)) if factor.is_integer()
-                     else np.interp(np.arange(int(len(x) * factor)) / factor, np.arange(len(x)), x))
-            out[lab] = x.astype(np.float32)
+            out[lab] = (data[i].astype(np.float32), sfreq)
+    return out
+
+
+def resample(x: np.ndarray, fs: float, target: float) -> np.ndarray:
+    """Lleva una señal a otra frecuencia (repetición si el factor es entero, si no interpolación)."""
+    if fs == target:
+        return x
+    factor = target / fs
+    if factor.is_integer():
+        return np.repeat(x, int(factor))
+    n = int(round(len(x) * factor))
+    return np.interp(np.arange(n) / factor, np.arange(len(x)), x).astype(np.float32)
+
+
+def to_common_rate(series: dict[str, tuple[np.ndarray, float]]) -> tuple[dict[str, np.ndarray], float]:
+    """Todos los canales a la frecuencia del más rápido y con la misma longitud (visor).
+    Los lentos (el EMG de 1 Hz de Sleep-EDFx) se repiten, como hace MNE al precargar."""
+    top = max(fs for _, fs in series.values())
+    out = {lab: resample(x, fs, top) for lab, (x, fs) in series.items()}
     n = min(len(v) for v in out.values())
     return {lab: v[:n] for lab, v in out.items()}, top
+
+
+def subset_edf(src: str, dst: str, keep: list[str]):
+    """Copia `src` en `dst` con solo los canales `keep` (en el orden del archivo).
+    Es una copia exacta de las muestras: se reescribe el encabezado y, en cada
+    registro de datos, se copian los bloques de los canales que se quedan."""
+    with open(src, "rb") as fh:
+        raw = fh.read(HEADER_PROBE)
+        size = header_size(raw[:256])
+        if not size:
+            raise InvalidFile(f"{src} no es un EDF válido.")
+        if size > len(raw):
+            raw += fh.read(size - len(raw))
+        head, ns = bytearray(raw[:256]), (size - 256) // 256
+        sig = raw[256:size]
+        labels = [_field(sig[i * 16:(i + 1) * 16]) for i in range(ns)]
+        idx = [i for i, lab in enumerate(labels) if lab in set(keep)]
+        missing = set(keep) - {labels[i] for i in idx}
+        if missing:
+            raise InvalidFile(f"{src} no tiene los canales {', '.join(sorted(missing))}.")
+        widths = (16, 80, 8, 8, 8, 8, 8, 80, 8, 32)       # campos del encabezado de cada señal
+        new_sig, off = b"", 0
+        for w in widths:
+            block = sig[off:off + ns * w]
+            new_sig += b"".join(block[i * w:(i + 1) * w] for i in idx)
+            off += ns * w
+        spr = [int(float(_field(sig[sum(widths[:8]) * ns + i * 8: sum(widths[:8]) * ns + (i + 1) * 8]) or 0))
+               for i in range(ns)]
+        n_new = len(idx)
+        head[184:192] = str(256 + n_new * 256).encode().ljust(8)
+        head[252:256] = str(n_new).encode().ljust(4)
+        record_bytes = 2 * sum(spr)
+        starts = np.concatenate([[0], np.cumsum(spr)[:-1]]) * 2
+        with open(dst, "wb") as out:
+            out.write(bytes(head) + new_sig)
+            fh.seek(size)
+            while True:
+                rec = fh.read(record_bytes)
+                if len(rec) < record_bytes:
+                    break
+                out.write(b"".join(rec[starts[i]:starts[i] + 2 * spr[i]] for i in idx))

@@ -12,7 +12,7 @@ La documentación interactiva generada por FastAPI está en `http://localhost:80
 - **Auth:** todo excepto `/health` y `/auth/login` exige `Authorization: Bearer <token>`.
   `401` → el tablero cierra la sesión y vuelve al login.
 - **Estadios:** `0=W, 1=N1, 2=N2, 3=N3, 4=REM`; `-1` = época sin estadio (solo en la referencia).
-- **Modalidades:** `fpz` (EEG Fpz-Cz), `pz` (EEG Pz-Oz), `eog` (EOG horizontal), `emg`
+- **Entradas del modelo:** `fpz` (EEG Fpz-Cz), `pz` (EEG Pz-Oz), `eog` (EOG horizontal), `emg`
   (EMG submental). Las combinaciones se nombran como en el proyecto de grado:
   `fpz`, `pz`, `eeg2`, `fpz_eog`, …, `eeg2_eog_emg` (12 en total, siempre con un EEG).
 - **Épocas:** índices desde 0 relativos al inicio de la **ventana analizada**.
@@ -29,131 +29,182 @@ La documentación interactiva generada por FastAPI está en `http://localhost:80
 · **401** `invalid_credentials`.
 
 El token está firmado (usuario, vencimiento a 12 h, HMAC): sobrevive a reinicios de la API.
-Cada corrección queda firmada con `user.name`. Más cuentas: variable `SOMNOAI_USERS`.
+Cada decisión queda firmada con `user.name`. Más cuentas: variable `SOMNOAI_USERS`.
 
 ### GET `/health` (sin auth)
-`{ "status": "ok", "records": 6, "model": { "kind": "provisional", "version": "yasa-0.7.0-provisional" } }`
+`{ "status": "ok", "records": 6, "model": { "kind": "provisional", "name": "Modelo provisional (YASA)", "version": "yasa-0.7.0-provisional" } }`
 
 ---
 
-## 2 · Configuración y noches demo
+## 2 · Configuración y catálogo
 
 ### GET `/config`
-Las reglas del modelo y el catálogo de canales. El tablero **no** las duplica.
+Reglas del modelo (las **reporta el adaptador**, no se fijan en el tablero) y catálogo de canales.
 ```json
 {
   "stages": ["W", "N1", "N2", "N3", "REM"],
   "epoch_s": 30,
   "channels": { "fpz": { "label": "EEG Fpz-Cz", "kind": "eeg", "name": "Fpz-Cz" }, "…": {} },
   "channel_aliases": { "fpz": ["^(eeg)?fpz-?cz$"], "…": [] },
+  "channel_kinds": { "eeg": ["eeg", "…"], "eog": ["…"], "emg": ["…"] },
   "confidence_threshold": 0.65,
   "night_review_fraction": 0.273,
   "mf1_goal": 0.75,
   "window_margin_min": 30,
   "min_window_min": 10,
   "expected": { "fpz": { "cv_mf1": 0.802, "test_mf1": 0.772, "test_ci": [0.736, 0.802], "test_kappa": 0.75, "test_f1_n1": 0.518 }, "…": {} },
+  "expected_source": "Modelo del proyecto, Tabla IV del informe (test, 16 sujetos)",
   "max_upload_mb": 600,
-  "model": { "kind": "provisional", "version": "yasa-0.7.0-provisional" }
+  "max_note_chars": 2000,
+  "model": { "kind": "provisional", "name": "Modelo provisional (YASA)", "version": "yasa-0.7.0-provisional",
+             "threshold": 0.65, "night_review_fraction": 0.273, "expected_source": "…" },
+  "bands": [ { "key": "delta", "label": "Delta", "lo": 0.5, "hi": 4.0, "hint": "…" }, "…" ],
+  "steps": [ { "key": "load", "label": "Cargar señales" }, { "key": "preprocess", "label": "Preprocesar" },
+             { "key": "predict", "label": "Predecir" }, { "key": "flag", "label": "Marcar épocas" },
+             { "key": "save", "label": "Guardar" } ],
+  "catalog": { "kind": "s3", "location": "s3://bucket/prefijo/" }
 }
 ```
-`expected` es la Tabla IV del informe (sistema completo por combinación). `channel_aliases`
-son expresiones regulares sobre la etiqueta normalizada (minúsculas, sin espacios, `_` ni `.`).
 
-### GET `/demos`
-Noches del índice de Sleep-EDFx cuyos archivos están en el servidor (`backend/data/demo`).
+### GET `/catalog[?refresh=true]`
+Las noches del catálogo (`SOMNOAI_CATALOG`: carpeta local o `s3://bucket/prefijo/`). Listarlo **no
+descarga** ninguna noche: solo se lee el encabezado de cada PSG (por rango en S3) y se guarda en la
+base. El listado se cachea `SOMNOAI_CATALOG_TTL` segundos; `refresh=true` lo relee.
 ```json
-{ "demos": [ {
-  "id": "SC4001E0", "subject": 0, "night": 1, "age": 33, "sex": "F", "lights_off": "00:38",
-  "psg": "SC4001E0-PSG.edf", "hypnogram": "SC4001EC-Hypnogram.edf",
-  "split": "test", "featured": true, "has_hypnogram": true,
-  "header": { "labels": ["EEG Fpz-Cz", "…"], "fs": { "EEG Fpz-Cz": 100.0, "…": 1.0 },
-              "start_clock_s": 58380, "duration_s": 79500.0 },
-  "detected": { "fpz": "EEG Fpz-Cz", "pz": "EEG Pz-Oz", "eog": "EOG horizontal", "emg": "EMG submental" }
-} ] }
+{ "source": { "kind": "s3", "location": "s3://bucket/sleep-edfx/" },
+  "nights": [ {
+    "id": "SC4001E0-PSG.edf",                 // ruta del PSG relativa al catálogo: es el id
+    "label": "SC4001E0", "psg": "SC4001E0-PSG.edf", "hypnogram": "SC4001EC-Hypnogram.edf",
+    "folder": "", "subset": false, "size_mb": 46.1,
+    "subject": 0, "night": 1, "age": 33, "sex": "F", "lights_off": "00:38", "split": "test",
+    "featured": true, "has_hypnogram": true,
+    "header": { "labels": ["EEG Fpz-Cz", "…"], "fs": { "EEG Fpz-Cz": 100.0, "…": 1.0 }, "duration_s": 79500.0,
+                "start": "1989-04-24T16:13:00", "start_clock_s": 58380, "n_channels": 7,
+                "patient": { "age": 33, "sex": "F" }, "annotations_only": false },
+    "channels": { "…": "ver «Canales de un archivo» abajo" },
+    "available": ["fpz", "pz", "eog", "emg"]
+  } ] }
 ```
-`split`: `test` (sujeto reservado, el modelo no lo vio) o `dev` (se usó para entrenar).
+- `subset`: la noche cuelga de `subsets/` (subconjunto de canales, `scripts/make_subset_nights.py`).
+- `split`: `test` (sujeto reservado, el modelo no lo vio) o `dev` (se usó para entrenar); `null` fuera del índice.
+- **502** `catalog_unavailable` si S3 no responde o faltan permisos (el `message` dice por qué).
 
-### GET `/dataset/lookup?file_name=SC4001E0-PSG.edf`
-`{ "night": { "id", "subject", "night", "age", "sex", "lights_off", "psg", "hypnogram", "split" } }`
-o `{ "night": null }` si el archivo no sigue la convención `SC4ssN…` de Sleep-EDFx.
+### Canales de un archivo (`channels`)
+Lo devuelven el catálogo y las cargas: qué canales del archivo puede usar el modelo.
+```json
+{
+  "channels": [ { "label": "EEG Fpz-Cz", "fs": 100.0, "kind": "eeg", "match": "fpz", "usable": true },
+                { "label": "Resp oro-nasal", "fs": 1.0, "kind": null, "match": null, "usable": false } ],
+  "matched":    { "fpz": "EEG Fpz-Cz", "pz": "EEG Pz-Oz", "eog": "EOG horizontal", "emg": "EMG submental" },
+  "candidates": { "fpz": ["EEG Fpz-Cz", "EEG Pz-Oz"], "pz": ["…"], "eog": ["EOG horizontal"], "emg": ["EMG submental"] },
+  "total": 7, "usable": 4,
+  "unused": ["Resp oro-nasal", "Temp rectal", "Event marker"],
+  "has_eeg": true
+}
+```
+- `matched`: la entrada se reconoce por el nombre del canal (se asigna sola).
+- `candidates`: canales del **mismo tipo** (EEG, EOG, EMG) que se pueden asignar a mano a esa entrada.
+- `unused`: «en el archivo, no lo usa el modelo»; no se pueden asignar a ninguna entrada.
 
 ---
 
-## 3 · Análisis (asíncronos)
+## 3 · PSG propio (opción secundaria)
 
-Crear un análisis valida al instante formato, canales y ventana, y responde **202** con el
-resumen en estado `queued`. El análisis corre en segundo plano (el endpoint de SageMaker
-puede tardar minutos en encenderse); el tablero consulta `GET /records/{id}` hasta que
-`status` sea `done` o `failed`.
-
-### POST `/analyses` — `multipart/form-data`
-
+### POST `/uploads` — `multipart/form-data`
 | campo | tipo | reglas |
 |---|---|---|
-| `file` | archivo | `.edf` (PSG) o `.zip` con el PSG y, opcional, su `*Hypnogram*.edf`. Máx. 600 MB. |
-| `hypnogram` | archivo, opcional | EDF+ de anotaciones. Si viene, manda sobre el del zip. |
-| `channels` | texto | modalidades separadas por coma: `fpz,eog`. Al menos un EEG. |
-| `channel_map` | JSON, opcional | `{"fpz": "C4-M1"}`: etiqueta del archivo para una modalidad (montajes con otro nombre). Lo que no venga se reconoce por nombre. |
-| `window_mode` | texto, opcional | `reference` (ventana de sueño del hipnograma ±30 min), `range` o `full`. Por defecto `reference` si hay hipnograma, si no `full`. |
-| `start_clock`, `end_clock` | `HH:MM` | obligatorios con `range`. Se interpretan como la primera vez que el reloj marca esa hora después del inicio del registro. |
-| `lights_off` | `HH:MM` o `none` | apagado de luces. Ausente → el del índice de Sleep-EDFx si la noche está en él; `none` → sin apagado (se toma el inicio de la ventana). |
+| `file` | archivo | PSG `.edf` (o `.zip` con el PSG y, opcional, su `*Hypnogram*.edf`). Máx. 600 MB. |
+| `hypnogram` | archivo, opcional | EDF+ de anotaciones; solo es referencia. |
 
-**202** → resumen (ver §4) con `"status": "queued"` y `progress`.
+**201** → `{ "id", "file_name", "size_mb", "header": {…}, "channels": {…}, "hypnogram": {"name"} | null, "dataset": {…} | null }`.
+**422** `invalid_file` con lo que está mal: no es un EDF legible, es solo un hipnograma, no tiene
+ninguno de los canales del modelo, no tiene EEG, el hipnograma no trae estadios…
 
-**Errores:** `413 too_large`; `422 invalid_file` (no es EDF, solo hipnograma, ventana o
-apagado de luces inválidos, «la ventana del hipnograma necesita el hipnograma»…);
-`422 invalid_channels` (sin EEG, canal ausente, etiqueta repetida). El `message` explica qué falló.
+### POST `/uploads/{id}/hypnogram` (`multipart`, campo `file`) · DELETE `/uploads/{id}/hypnogram`
+Adjunta o quita el hipnograma de referencia → la carga actualizada.
 
-### POST `/analyses/demo` — JSON
-```json
-{ "demo_id": "SC4001E0", "channels": ["fpz", "eog"], "channel_map": null,
-  "window_mode": "reference", "start_clock": null, "end_clock": null, "lights_off": null }
-```
-Mismas reglas que la carga. **202** → resumen · **404** demo desconocido o sin archivos.
+### GET `/uploads/{id}` · DELETE `/uploads/{id}`
+La carga, o borrarla (409 `in_use` si ya pertenece a un análisis). Una carga se borra sola cuando su
+análisis termina bien; si falla se conserva para reintentar. Las que nadie analizó se borran al
+arrancar pasadas 24 h.
 
 ---
 
-## 4 · Registros
+## 4 · Análisis (asíncronos)
+
+### POST `/analyses` — JSON
+```json
+{ "source": { "type": "catalog", "id": "SC4001E0-PSG.edf" },      // o { "type": "upload", "id": "<id de la carga>" }
+  "channels": ["fpz", "eog"],
+  "channel_map": null,              // {"fpz": "C4-M1"}: otro canal del mismo tipo para una entrada
+  "window_mode": "reference",       // reference | range | full (por defecto reference si hay hipnograma)
+  "start_clock": null, "end_clock": null,   // HH:MM, obligatorios con range
+  "lights_off": null }              // HH:MM | "none" | null (= el del índice de Sleep-EDFx)
+```
+Valida al instante fuente, canales y ventana, y responde **202** con el resumen en estado `queued`.
+El análisis corre en segundo plano; el tablero consulta `GET /records/{id}` hasta `done` o `failed`.
+
+**Errores:** `404 not_found` (noche o carga inexistente); `422 invalid_channels` (ningún canal:
+«Seleccione al menos un canal»; sin EEG; un mismo canal en dos entradas; un canal que el modelo no
+usa; canal ausente); `422 invalid_file` (ventana, apagado de luces, hipnograma…); `502 catalog_unavailable`.
+
+### Pasos (`progress`)
+Cada análisis informa el estado de cada paso del pipeline:
+```json
+{ "current": "predict",
+  "steps": [ { "key": "load", "label": "Cargar señales", "status": "done", "message": "2 canales del modelo · 7,0 h de ventana", "seconds": 0.12 },
+             { "key": "preprocess", "label": "Preprocesar", "status": "done", "message": "841 épocas de 30 s", "seconds": 0.03 },
+             { "key": "predict", "label": "Predecir", "status": "running", "message": "Estadificando con Modelo provisional (YASA)", "seconds": null },
+             { "key": "flag", "label": "Marcar épocas", "status": "pending", "message": null, "seconds": null },
+             { "key": "save", "label": "Guardar", "status": "pending", "message": null, "seconds": null } ] }
+```
+`status`: `pending | running | done | failed`. Si un paso falla queda `failed` con el motivo en
+`message`, el registro queda `failed` con ese `error` y **no se guarda ningún resultado** de la noche.
+
+### POST `/records/{id}/retry`
+Vuelve a lanzar un análisis `failed` con la misma configuración (mismo registro, `attempts` + 1;
+queda en la bitácora). **409** si no está fallido.
+
+---
+
+## 5 · Registros
 
 ### GET `/records`
 Todos los análisis, más reciente primero.
 ```json
 { "records": [ {
   "id": "09f629e7f596", "created_at": "2026-10-27T19:08:04", "created_by": "Sistema",
-  "source": "demo", "file_name": "SC4001E0-PSG.edf", "subject_code": "SC00", "sex": "F", "age": 33,
+  "source": "catalog", "source_id": "SC4001E0-PSG.edf", "night_label": "SC4001E0", "subset": false,
+  "file_name": "SC4001E0-PSG.edf", "subject_code": "SC00", "sex": "F", "age": 33,
   "channels": ["fpz", "pz", "eog", "emg"], "combination": "eeg2_eog_emg",
   "combination_name": "Fpz-Cz + Pz-Oz + EOG + EMG", "window_mode": "reference",
   "n_epochs": 841, "has_reference": true, "dataset_split": "test",
   "model_version": "yasa-0.7.0-provisional", "finished_at": "2026-10-27T19:08:05",
-  "status": "done", "progress": null, "error": null,
+  "status": "done", "progress": { "…": "pasos" }, "error": null, "attempts": 1,
   "review": {
-    "status": "in_progress", "n_epochs": 841, "flagged": 234, "flagged_fraction": 0.2782,
+    "status": "in_review", "n_epochs": 841, "flagged": 234, "flagged_fraction": 0.2782,
     "whole_night_recommended": true, "resolved": 2, "pending": 232, "confirmed": 1, "corrected": 1,
-    "signed_off_by": null, "signed_off_at": null
+    "finalized_by": null, "finalized_at": null
   }
 } ] }
 ```
-- `status`: `queued | running | done | failed`. En proceso, `progress` =
-  `{"step": "queued|reading|staging|metrics", "label": "…", "message": "…"}`; si falló, `error` trae el motivo.
-- `subject_code`: `"SC" + sujeto` según la convención Sleep-EDFx `SC4ssN…`.
-- `review` (solo `done`): marcadas = épocas con confianza bajo el umbral; resueltas = marcadas
-  que el especialista confirmó o corrigió; `corrected` = épocas cuyo estadio final difiere del
-  modelo (marcadas o no); `whole_night_recommended` = `flagged_fraction > night_review_fraction`.
-  `status`: `pending` (sin tocar) · `in_progress` · `signed_off` (finalizada y firmada).
+- `status` del análisis: `queued | running | done | failed`.
+- `review.status` = **estado de la noche**: `to_review` (analizada, por revisar) ·
+  `full_review_suggested` (se marcó más del 27,3 %) · `in_review` (ya hay decisiones) · `finalized`.
+- Marcadas = épocas con confianza bajo el umbral; resueltas = marcadas que el revisor decidió;
+  `confirmed` / `corrected` = épocas que el revisor dejó igual / cambió respecto del modelo.
 
 ### GET `/records/{id}`
 En proceso o fallido: el resumen anterior. Terminado: el resumen **más**:
-
 ```json
 {
   "patient":  { "age": 33, "sex": "F", "source": "edf-header" },
-  "channels": { "selected": ["fpz","pz","eog","emg"], "combination": "eeg2_eog_emg",
-                "combination_name": "…", "mask": [true,true,true,true],
-                "map": { "fpz": "EEG Fpz-Cz", "…": "…" },
-                "available": { "fpz": "EEG Fpz-Cz", "…": "…" },
-                "file_labels": ["EEG Fpz-Cz", "…"], "fs": { "fpz": 100.0, "emg": 1.0 } },
-  "model":    { "version": "…", "kind": "provisional|mock|sagemaker", "threshold": 0.65,
-                "night_review_fraction": 0.273, "notes": ["…"],
+  "channels": { "selected": ["fpz","pz","eog","emg"], "combination": "eeg2_eog_emg", "combination_name": "…",
+                "mask": [true,true,true,true], "map": { "fpz": "EEG Fpz-Cz", "…": "…" },
+                "available": { "fpz": "EEG Fpz-Cz", "…": "…" }, "file_labels": ["…"],
+                "unused": ["Resp oro-nasal", "Temp rectal", "Event marker"], "fs": { "fpz": 100.0, "emg": 1.0 } },
+  "model":    { "kind": "provisional", "name": "Modelo provisional (YASA)", "version": "yasa-0.7.0-provisional",
+                "threshold": 0.65, "night_review_fraction": 0.273, "expected_source": "…", "notes": ["…"],
                 "expected": { "test_mf1": 0.784, "test_ci": [0.753, 0.81], "test_kappa": 0.758,
                               "cv_mf1": 0.819, "test_f1_n1": 0.534, "below_goal": false, "goal_mf1": 0.75 } },
   "night":    { "epoch_s": 30, "n_epochs": 841, "start_epoch": 961, "start_clock_s": 87210,
@@ -165,73 +216,91 @@ En proceso o fallido: el resumen anterior. Terminado: el resumen **más**:
   "metrics":  { "predicted": { "…": "…" }, "final": { "…": "…" }, "reference": { "…": "…" } },
   "agreement": { "predicted": { "…": "…" }, "final": { "…": "…" } },
   "corrections": [ { "epoch": 64, "stage": 2, "author": "Superusuario", "at": "2026-10-27T19:09:46" } ],
-  "history": [ { "at": "…", "author": "Superusuario", "action": "set", "epoch": 64, "stage": 2, "previous": 1 } ],
-  "review": { "…": "igual que en el listado" },
-  "quality":  { "file": { "name": "…", "size_mb": 46.1, "start": "1989-04-24T16:13:00",
-                          "start_clock_s": 58380, "total_duration_s": 79500.0, "channels": 7, "sampling_hz": 100.0 },
-                "composition": [ { "label": "Antes de la ventana", "hours": 8.01, "kind": "outside" },
-                                 { "label": "Ventana analizada", "hours": 7.01, "kind": "window" }, "…" ],
-                "reference_unscored": 0,
-                "timings": { "read_s": 0.14, "model_s": 1.26, "total_s": 1.4 } },
-  "dataset":  { "id": "SC4001E0", "subject": 0, "night": 1, "split": "test", "lights_off": "00:38", "…": "…" }
+  "history": [ { "at": "…", "author": "Superusuario", "action": "set", "epoch": 64, "stage": 2, "previous": 1, "old": "N1", "new": "N2" } ],
+  "notes":   [ { "id": 3, "at": "…", "author": "Superusuario", "text": "Artefacto de movimiento a las 01:10." } ],
+  "review":  { "…": "igual que en el listado" },
+  "quality": { "file": { "name": "…", "size_mb": 46.1, "start": "1989-04-24T16:13:00", "start_clock_s": 58380,
+                         "total_duration_s": 79500.0, "channels": 7, "sampling_hz": 100.0 },
+               "composition": [ { "label": "Ventana analizada", "hours": 7.01, "kind": "window" }, "…" ],
+               "reference_unscored": 0, "timings": { "read_s": 0.14, "model_s": 1.26, "total_s": 1.4 } },
+  "dataset":  { "id": "SC4001E0", "subject": 0, "night": 1, "split": "test", "lights_off": "00:38", "…": "…" },
+  "source_info": { "type": "catalog", "id": "SC4001E0-PSG.edf", "label": "SC4001E0", "subset": false, "location": "s3://…" }
 }
 ```
-
 Notas:
-- `epochs.*` van alineados por índice (una entrada por época de la ventana). `stage`,
-  `second`, `confidence` y `review` se derivan de `probs` con la regla del informe: estadio =
-  argmax, confianza = su probabilidad, `review = confidence < threshold`.
-- `epochs.final` = predicción con las correcciones vigentes encima. `metrics.final` y
-  `agreement.final` se recalculan con cada corrección.
-- `epochs.reference` y `agreement` solo existen si hubo hipnograma de referencia.
-- `night.start_clock_s`: hora de reloj del inicio de la ventana en segundos desde las 00:00
-  (puede superar 86400 si cruza la medianoche). `lights_off_epoch` puede ser negativo (antes
-  de la ventana); `lights_off_source`: `manual` o `dataset-index`.
-- `metrics.*`: `tib_min`, `tst_min`, `efficiency_pct`, `sol_min`, `rem_latency_min`,
-  `waso_min`, `awakenings` (vigilia ≥ 1 min tras dormirse) y `stages.{W,N1,N2,N3,REM}` con
-  `min` y `pct` (W como % del tiempo en cama; el resto, % del sueño total).
-- `agreement.*`: `n_epochs`, `accuracy`, `mf1`, `kappa`, `f1` por estadio y `confusion`
-  (5×5, filas = referencia, columnas = predicción).
-- `channels.available`: todas las modalidades reconocibles del archivo (el visor puede
-  mostrar también las que no se le dieron al modelo).
+- `model.version` y `model.threshold` son los que reportó el adaptador **cuando se analizó** la noche;
+  no cambian aunque el adaptador cambie después.
+- `epochs.*` van alineados por índice. `stage` es el estadio que devolvió el adaptador (validado: es el
+  más probable), `confidence` su probabilidad, `second` el siguiente más probable y
+  `review = confidence < threshold`.
+- `epochs.final` = predicción con las decisiones vigentes encima. `metrics.final` y
+  `agreement.final` se recalculan con cada decisión.
+- `metrics.*`: `tib_min`, `tst_min`, `efficiency_pct`, `sol_min`, `rem_latency_min`, `waso_min`,
+  `awakenings` (vigilia ≥ 1 min tras dormirse) y `stages.{W,N1,N2,N3,REM}` con `min` y `pct`
+  (W como % del tiempo en cama; el resto, % del sueño total). Se cuentan desde el apagado de luces.
+- `agreement.*` (solo con referencia): `n_epochs`, `accuracy`, `mf1`, `kappa`, `f1` por estadio y
+  `confusion` (5×5, filas = referencia, columnas = predicción).
+- `history[].action`: `set` (confirmar o corregir) · `clear` (volver al modelo) · `finalize` ·
+  `reopen` · `note` · `retry`, con el valor anterior (`old`) y el nuevo (`new`).
 
 ### DELETE `/records/{id}`
 **200** `{"deleted": "<id>"}` · **404** · **409 busy** si el análisis sigue en proceso.
-Borra también correcciones, bitácora y señal derivada.
+Borra también decisiones, notas, bitácora y señal derivada.
 
 ### GET `/records/{id}/signal?start_s=2400&duration_s=90&points=800&channels=fpz,eog`
 Envolvente mín-máx por canal para la ventana visible (nunca la señal cruda completa).
-`start_s` relativo al inicio de la ventana analizada; `points` ≤ 4000; `channels` vacío = todos.
 ```json
 { "start_s": 2400, "duration_s": 90, "points": 800, "unit": "µV",
   "traces": { "fpz": { "min": [-42.1, "…"], "max": [38.9, "…"] }, "eog": { "…": "…" } } }
 ```
-**404** · **409 not_ready** · **422 out_of_range**.
+
+### GET `/records/{id}/epochs/{epoch}/evidence[?channel=pz]`
+Evidencia espectral de la época: potencia relativa del EEG por banda (Welch, 0,5–30 Hz) y el perfil
+típico de cada estadio **en esta misma noche** (mediana de las épocas sobre el umbral o decididas por
+un revisor, según el hipnograma final).
+```json
+{ "epoch": 64, "channel": "fpz", "channel_name": "Fpz-Cz", "file_label": "EEG Fpz-Cz", "channels": ["fpz", "pz"], "fs": 100.0,
+  "bands": [ { "key": "delta", "label": "Delta", "lo": 0.5, "hi": 4.0, "hint": "…", "value": 0.81 }, "…" ],
+  "typical": { "N2": { "n": 195, "values": [0.83, 0.11, 0.02, 0.02, 0.01] }, "…": {} },
+  "candidates": [2, 1], "closest": 2,
+  "method": "Potencia relativa del EEG por banda (Welch, ventanas de 4 s) entre 0,5 y 30 Hz." }
+```
+`closest`: de los dos estadios candidatos, el de perfil típico más parecido (o `null`).
+**422** si la época no existe o el canal no es un EEG del registro.
 
 ---
 
-## 5 · Revisión del especialista
+## 6 · Revisión del especialista
 
 ### PATCH `/records/{id}/epochs`
 ```json
 { "changes": [ { "epoch": 64, "stage": 2 }, { "epoch": 59, "stage": 0 }, { "epoch": 70, "stage": null } ] }
 ```
-- `stage` 0–4: el estadio que decide el especialista. Igual a la predicción = **confirmar**.
-- `stage: null`: vuelve a la predicción del modelo (borra la corrección).
-- Cada cambio queda en la bitácora con autor, fecha y estadio anterior.
+- `stage` 0–4: el estadio que decide el revisor. Igual al del modelo = **confirmada**; distinto = **corregida**.
+- `stage: null`: vuelve al estadio del modelo (deshace la decisión).
+- Cada cambio queda en la bitácora con usuario, fecha, valor anterior y nuevo.
 
-**200** → `{ "final", "metrics_final", "agreement_final", "corrections", "review", "history" }`
-(lo que cambia con la corrección; el tablero lo combina con el detalle que ya tiene).
+**200** → `{ "final", "metrics_final", "agreement_final", "corrections", "review", "history", "notes" }`.
 **409 review_locked** si la revisión está finalizada · **422 out_of_range / invalid_stage**.
 
+### GET `/records/{id}/changes`
+Resumen antes de finalizar:
+`{ "confirmed": 12, "corrected": 3, "pending": 210, "changes": [ { "epoch": 64, "clock_s": 87420, "model_stage": 1, "reviewer_stage": 2, "flagged": true, "author": "…", "at": "…" } ], "review": {…} }`
+
 ### POST `/records/{id}/review`
-`{ "action": "sign_off" }` finaliza y firma la revisión (con épocas pendientes, el
-hipnograma final las toma como las predijo el modelo); `{ "action": "reopen" }` la reabre.
+`{ "action": "finalize", "expected_corrected": 3 }` finaliza la revisión con el nombre del usuario
+(con épocas pendientes, el hipnograma final las toma como las predijo el modelo). `expected_corrected`
+es el número de cambios que vio el revisor en el resumen: si ya no coincide → **409 stale_summary**.
+`{ "action": "reopen" }` la reabre. **409** si ya estaba finalizada / no lo estaba.
 **200** → mismo cuerpo que el PATCH.
+
+### POST `/records/{id}/notes`
+`{ "text": "…" }` (1–2000 caracteres) → **201** `{ "notes": [...], "history": [...] }`. La nota queda
+con autor y fecha, y en la bitácora (`action: "note"`).
 
 ---
 
-## 6 · Exportación (CSV)
+## 7 · Exportación (CSV)
 
 ### GET `/records/{id}/export.csv`
 Una fila por época: `epoca, hora, inicio_s, prediccion, confianza, segunda_opcion,
@@ -241,20 +310,19 @@ p_W, p_N1, p_N2, p_N3, p_REM, marcada_revisar, estadio_final, revision
 ### GET `/corrections/export.csv`
 Todas las épocas confirmadas o corregidas por un especialista, en todos los registros:
 `registro, archivo, sujeto, combinacion, version_modelo, epoca, inicio_s, prediccion,
-confianza, marcada_revisar, estadio_especialista, autor, fecha, referencia`. Es el insumo
-para medir el modelo en uso y reentrenarlo.
+confianza, marcada_revisar, estadio_especialista, autor, fecha, referencia`.
 
 ---
 
-## 7 · Qué consume cada panel
+## 8 · Qué consume cada panel
 
 | Panel | Campos |
 |---|---|
-| KPIs, distribución y tabla (Registros) | `records[]`: `review.*`, `status`, `channels`, `n_epochs`, `subject_code` |
-| Paso 2 · canales (Analizar) | `GET /config` (`channels`, `channel_aliases`, `expected`), encabezado leído en el navegador o `demos[].header` |
-| Avisos y KPIs (Resultados) | `review`, `model.expected`, `model.notes`, `dataset.split`, `agreement` |
-| Hipnograma | `epochs.final/stage`, `epochs.review`, `epochs.confidence`, `epochs.reference`, `corrections`, `night` |
-| Revisión época a época | `epochs.*` + `GET …/signal` + `PATCH …/epochs` + `POST …/review` |
-| Arquitectura del sueño | `metrics.predicted/final/reference` |
-| Concordancia | `agreement.predicted/final` |
-| Registro y modelo | `quality.*`, `night.*`, `model.*`, `channels.map`, `history` |
+| Registros (KPIs, gráfico, tabla) | `records[]`: `review.*`, `status`, `progress`, `channels`, `n_epochs`, `subset` |
+| Analizar · 1 elegir la noche | `GET /catalog`, `POST /uploads` |
+| Analizar · 2 canales | `nights[].channels` o `upload.channels`, `GET /config` (`channels`, `expected`) |
+| Diálogo de avance | `POST /analyses`, `GET /records/{id}` → `progress.steps`, `POST …/retry` |
+| Vista clínica | `review`, `epochs.*`, `metrics.final`, `notes`, `history`, `model` (versión y umbral) |
+| Revisión época a época | `epochs.*` + `GET …/signal` + `GET …/evidence` + `PATCH …/epochs` |
+| Finalizar | `GET …/changes` + `POST …/review` |
+| Desempeño del modelo | `agreement.*`, `model.expected`, `metrics.predicted/final/reference`, `quality.timings` |

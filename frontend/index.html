@@ -12,20 +12,20 @@ document.documentElement.dataset.theme=_t}catch(e){}</script>
 :root{
   color-scheme: light;
   --page:#f5f5f2; --surface-1:#fcfcfb; --surface-2:#f0efec; --surface-3:#e7e6e1;
-  --ink:#0b0b0b; --ink2:#52514e; --muted:#726f67;
-  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.11);
+  --ink:#0b0b0b; --ink2:#52514e; --muted:#6b6860;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.11); --ctl:#77746b;
   --s1:#2a78d6; --s2:#eb6834;
   --good:#0ca30c; --warn:#fab219; --crit:#d03b3b; --corr:#7c4fd6;
-  --ok-text:#006300; --warn-text:#8a5c00; --corr-text:#5b34b0;
+  --ok-text:#006300; --warn-text:#8a5c00; --corr-text:#5b34b0; --link:#1f63b8;
   --shadow:0 1px 2px rgba(11,11,11,.05), 0 4px 14px rgba(11,11,11,.05);
 }
 :root[data-theme="dark"]{
   color-scheme: dark;
   --page:#0d0d0d; --surface-1:#1a1a19; --surface-2:#232322; --surface-3:#2c2c2a;
-  --ink:#ffffff; --ink2:#cfcec6; --muted:#9b9992;
-  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.15);
+  --ink:#ffffff; --ink2:#cfcec6; --muted:#a3a19a;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.15); --ctl:#8f8d86;
   --s1:#3987e5; --s2:#d95926; --corr:#9b7bf0;
-  --ok-text:#0ca30c; --warn-text:#fab219; --corr-text:#b9a2f5;
+  --ok-text:#0ca30c; --warn-text:#fab219; --corr-text:#b9a2f5; --link:#6aa8f0;
   --shadow:0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
 }
 *{box-sizing:border-box}
@@ -42,6 +42,7 @@ svg{display:block;width:100%;height:auto;overflow:visible}
 .grow{flex:1}
 html{scroll-behavior:smooth}
 :focus-visible{outline:2px solid var(--s1);outline-offset:2px;border-radius:6px}
+textarea{font:inherit}
 
 /* ---------- chrome ---------- */
 header{background:var(--surface-1);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:30}
@@ -68,17 +69,17 @@ nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--s1);
 /* ---------- layout ---------- */
 .panel{background:var(--surface-1);border:1px solid var(--border);border-radius:13px;padding:19px;margin-top:16px}
 .panel.flat{background:var(--surface-2)}
-.panel > h3, .phead h3{font-size:14.5px}
-.panel .cap{color:var(--muted);font-size:12.5px;margin-top:2px;margin-bottom:15px}
+.panel > h3, .phead h3{font-size:15px}
+.panel .cap{color:var(--muted);font-size:13px;margin-top:3px;margin-bottom:15px}
 .phead{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .row{display:grid;gap:16px}
 @media(min-width:920px){ .row.two{grid-template-columns:1fr 1fr} .row.three{grid-template-columns:1fr 1fr 1fr} }
 .stitle{margin-top:26px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .stitle h2{font-size:20px}
-.stitle .why{color:var(--muted);font-size:12.5px}
-.mini{font-size:12px;color:var(--muted);margin-top:12px;line-height:1.55}
+.stitle .why{color:var(--muted);font-size:13px}
+.mini{font-size:12.5px;color:var(--muted);margin-top:12px;line-height:1.55}
 .mini b{color:var(--ink2);font-weight:600}
-.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2.5px 9px;border-radius:999px;
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:2.5px 9px;border-radius:999px;
   border:1px solid var(--border);color:var(--ink2);background:var(--surface-2);white-space:nowrap}
 .pill.ok{border-color:color-mix(in srgb,var(--good) 45%,transparent);color:var(--ok-text)}
 .pill.x{border-color:color-mix(in srgb,var(--crit) 45%,transparent);color:var(--crit)}
@@ -88,18 +89,49 @@ nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--s1);
 .back{display:inline-flex;align-items:center;gap:7px;background:none;border:0;padding:0;margin-top:24px;
   font:inherit;font-size:13px;color:var(--ink2);cursor:pointer}
 .back:hover{color:var(--s1)}
-.err{color:var(--crit);font-size:12.5px;margin-top:10px;display:none}
+.err{color:var(--crit);font-size:13px;margin-top:10px;display:none}
 .err.show{display:block}
-.linkbtn{background:none;border:0;padding:0;font:inherit;font-size:12.5px;color:var(--s1);cursor:pointer;margin-top:10px}
+.linkbtn{background:none;border:0;padding:0;font:inherit;font-size:13px;color:var(--link);cursor:pointer;margin-top:10px}
 .linkbtn:hover{text-decoration:underline}
+.linkbtn[disabled]{color:var(--muted);cursor:default;text-decoration:none}
 
-/* ---------- carga ---------- */
-.drop{border:1.5px dashed var(--axis);border-radius:12px;padding:46px 20px;text-align:center;
-  background:var(--surface-2);transition:.15s;cursor:pointer}
+/* ---------- glosario: botón ⓘ y su explicación ---------- */
+.info{display:inline-grid;place-items:center;width:17px;height:17px;border-radius:50%;padding:0;margin-left:5px;
+  border:1px solid var(--ctl);background:transparent;color:var(--ink2);font:600 10.5px/1 Georgia,serif;
+  font-style:italic;cursor:help;vertical-align:1px;flex:none;text-transform:none;letter-spacing:0}
+.info:hover,.info[aria-expanded="true"]{background:var(--s1);border-color:var(--s1);color:#fff}
+.gloss{position:fixed;z-index:95;max-width:300px;background:var(--surface-1);color:var(--ink);border:1px solid var(--border);
+  border-radius:10px;padding:10px 13px;font-size:13px;line-height:1.5;box-shadow:0 10px 32px rgba(0,0,0,.2);
+  pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .12s ease,transform .12s ease}
+.gloss.on{opacity:1;transform:none}
+.gloss b{display:block;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+
+/* ---------- aviso de alcance ---------- */
+.scope{display:flex;gap:11px;align-items:flex-start;margin-top:14px;padding:11px 14px;border-radius:10px;
+  background:color-mix(in srgb,var(--s1) 7%,var(--surface-1));border:1px solid color-mix(in srgb,var(--s1) 30%,transparent);
+  font-size:13px;line-height:1.5;color:var(--ink2)}
+.scope b{color:var(--ink)}
+.scope .m{flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--s1);
+  color:#fff;font-size:11.5px;font-weight:700;margin-top:1px}
+
+/* ---------- catálogo y carga ---------- */
+.catlist{max-height:390px;overflow:auto;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);
+  padding:6px;display:grid;gap:6px}
+.night{display:flex;gap:12px;align-items:center;border:1px solid var(--border);border-radius:9px;padding:9px 12px;
+  background:var(--surface-1);cursor:pointer;text-align:left;font:inherit;color:inherit;width:100%}
+.night:hover{border-color:var(--s1)}
+.night[aria-pressed="true"]{border-color:var(--s1);box-shadow:0 0 0 1px var(--s1) inset;
+  background:color-mix(in srgb,var(--s1) 6%,var(--surface-1))}
+.night .id{font-weight:650;font-size:13.5px;min-width:88px}
+.night .who{font-size:13px;color:var(--ink2)}
+.night .mt{font-size:12px;color:var(--muted);margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.night .tags{margin-left:auto;display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+.catempty{padding:18px;text-align:center;color:var(--muted);font-size:13px}
+.uptoggle{margin-top:16px;padding-top:14px;border-top:1px solid var(--grid)}
+.drop{border:1.5px dashed var(--ctl);border-radius:12px;padding:30px 20px;text-align:center;
+  background:var(--surface-2);transition:.15s;cursor:pointer;margin-top:12px}
 .drop:hover,.drop.over{border-color:var(--s1);background:color-mix(in srgb,var(--s1) 5%,var(--surface-2))}
-.drop .ic{width:54px;height:54px;margin:0 auto 15px;border-radius:15px;background:var(--surface-1);
-  border:1px solid var(--border);display:grid;place-items:center;font-size:24px;box-shadow:var(--shadow)}
-.drop strong{display:block;font-size:17.5px;margin-bottom:5px;letter-spacing:-0.015em}
+.drop strong{display:block;font-size:15.5px;margin-bottom:4px;letter-spacing:-0.01em}
 .drop .hint{color:var(--muted);font-size:13px}
 .filerow{display:flex;gap:11px;align-items:center;border:1px solid var(--border);border-radius:10px;
   padding:10px 12px;margin-top:9px;background:var(--surface-1)}
@@ -107,13 +139,12 @@ nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--s1);
   font-weight:700;color:#fff;flex:none;background:var(--s1)}
 .filerow .ic.hyp{background:var(--s2)}
 .filerow .nm{font-weight:600;font-size:13px;overflow-wrap:anywhere}
-.filerow .mt{font-size:11.5px;color:var(--muted)}
-.filerow.demo{cursor:pointer}
-.filerow.demo:hover{border-color:var(--s1);background:color-mix(in srgb,var(--s1) 5%,var(--surface-1))}
-.filerow.demo.sel{border-color:var(--s1);box-shadow:0 0 0 1px var(--s1) inset}
+.filerow .mt{font-size:12px;color:var(--muted)}
 .filerow .rm{margin-left:auto;background:none;border:1px solid var(--border);border-radius:7px;
   width:26px;height:26px;font:inherit;font-size:13px;color:var(--muted);cursor:pointer;flex:none}
 .filerow .rm:hover{color:var(--crit);border-color:var(--crit)}
+.upbar{height:6px;border-radius:4px;background:var(--surface-3);overflow:hidden;margin-top:6px;max-width:320px}
+.upbar i{display:block;height:100%;background:var(--s1);transition:width .2s ease}
 .cta{background:var(--s1);color:#fff;border:0;border-radius:10px;padding:13px 26px;
   font:inherit;font-size:14.5px;font-weight:600;cursor:pointer;box-shadow:var(--shadow)}
 .cta:hover{filter:brightness(1.06)}
@@ -121,29 +152,31 @@ nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--s1);
 .cta.sm{padding:9px 16px;font-size:13px}
 .fields{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;margin-top:16px}
 .fld{display:flex;flex-direction:column;gap:6px}
-.fld label{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.fld label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;display:flex;align-items:center}
 .fld input,.fld select{background:var(--surface-1);border:1px solid var(--border);border-radius:9px;padding:9px 11px;
   font:inherit;font-size:14px;color:var(--ink)}
 .fld input[type=time]{width:132px}
 .stepn{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--s1);
   color:#fff;font-size:12px;font-weight:700;margin-right:8px;vertical-align:1px}
-.subh{font-size:14.5px;margin-top:26px}
+.subh{font-size:15px;margin-top:28px}
 
-/* tarjetas de canal */
-.chgrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(245px,1fr))}
+/* canales */
+.chsum{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13.5px;margin-bottom:12px}
+.chsum b{font-weight:650}
+.chgrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
 .chcard{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--border);border-radius:11px;
   padding:12px 13px;background:var(--surface-1)}
 .chcard.on{border-color:color-mix(in srgb,var(--s1) 55%,transparent);background:color-mix(in srgb,var(--s1) 5%,var(--surface-1))}
 .chcard.na{background:var(--surface-2)}
 .chcard.na .chname{color:var(--muted)}
 .chname{font-weight:650;font-size:13.5px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
-.chsrc{font-size:11.5px;color:var(--muted);margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.chsrc select{font:inherit;font-size:11.5px;color:var(--ink);background:var(--surface-1);border:1px solid var(--border);
-  border-radius:6px;padding:2px 4px;max-width:170px}
-.chwarn{font-size:11.5px;color:var(--warn-text);margin-top:5px;line-height:1.45}
+.chsrc{font-size:12px;color:var(--muted);margin-top:5px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.chsrc select{font:inherit;font-size:12.5px;color:var(--ink);background:var(--surface-1);border:1px solid var(--ctl);
+  border-radius:6px;padding:3px 5px;max-width:190px}
+.chwarn{font-size:12px;color:var(--warn-text);margin-top:5px;line-height:1.45}
 .sw{position:relative;width:34px;height:20px;flex:none;margin-top:1px}
 .sw input{position:absolute;inset:0;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;z-index:1}
-.sw span{position:absolute;inset:0;border-radius:999px;background:var(--surface-3);border:1px solid var(--border)}
+.sw span{position:absolute;inset:0;border-radius:999px;background:var(--surface-3);border:1px solid var(--ctl)}
 .sw span::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;
   background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .18s ease}
 .sw input:checked + span{background:var(--s1);border-color:var(--s1)}
@@ -151,39 +184,46 @@ nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--s1);
 .sw input:disabled{cursor:not-allowed}
 .sw input:disabled + span{opacity:.5}
 .sw input:focus-visible + span{outline:2px solid var(--s1);outline-offset:2px}
+.unusedch{margin-top:12px;border:1px dashed var(--border);border-radius:10px;padding:10px 12px;font-size:13px;
+  color:var(--ink2);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.unusedch .lbl{color:var(--muted);font-weight:600}
+.chip.off{background:transparent;border:1px solid var(--border);color:var(--muted);font-weight:600}
 .combo{margin-top:14px;border-radius:11px;padding:14px 15px;background:var(--surface-2);border:1px solid var(--border);
   display:grid;gap:14px}
 @media(min-width:920px){ .combo{grid-template-columns:minmax(250px,1fr) 1.5fr;align-items:center} }
-.combo .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.combo .k{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;display:flex;align-items:center}
 .combo .v{font-size:19px;font-weight:650;letter-spacing:-0.02em;margin-top:2px}
-.combo .n{font-size:12.5px;color:var(--ink2);margin-top:4px;line-height:1.5}
+.combo .n{font-size:13px;color:var(--ink2);margin-top:4px;line-height:1.55}
 .seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--border);border-radius:9px;overflow:hidden}
 .seg button{background:var(--surface-1);border:0;border-right:1px solid var(--border);padding:8px 14px;
-  font:inherit;font-size:12.5px;color:var(--ink2);cursor:pointer}
+  font:inherit;font-size:13px;color:var(--ink2);cursor:pointer}
 .seg button:last-child{border-right:0}
 .seg button[aria-pressed="true"]{background:var(--s1);color:#fff;font-weight:600}
 .seg button:disabled{color:var(--muted);cursor:not-allowed;background:var(--surface-2)}
+.runbar{display:flex;gap:14px;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-top:22px}
+.runmsg{font-size:13px;color:var(--warn-text);font-weight:600}
 
 /* chips de canal */
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap;vertical-align:middle}
-.chip{font-size:10.5px;font-weight:650;padding:1.5px 7px;border-radius:6px;background:var(--surface-3);
+.chip{font-size:11px;font-weight:650;padding:1.5px 7px;border-radius:6px;background:var(--surface-3);
   color:var(--ink2);letter-spacing:.02em;white-space:nowrap}
 .chip.eeg{background:color-mix(in srgb,var(--s1) 15%,var(--surface-1));color:var(--s1)}
+.chip.sub{background:color-mix(in srgb,var(--s2) 15%,var(--surface-1));color:var(--s2)}
 
 /* ---------- tiles / tablas ---------- */
-.tiles{display:grid;gap:11px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.tiles{display:grid;gap:11px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
 .tile{background:var(--surface-1);border:1px solid var(--border);border-radius:11px;padding:13px 14px}
-.tile .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.045em;font-weight:600}
+.tile .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.045em;font-weight:600;display:flex;align-items:center}
 .tile .v{font-size:25px;font-weight:640;margin-top:3px;letter-spacing:-0.025em}
 .tile .v small{font-size:14px;font-weight:500;color:var(--ink2)}
-.tile .n{font-size:11.5px;color:var(--ink2);margin-top:2px}
+.tile .n{font-size:12.5px;color:var(--ink2);margin-top:2px}
 .tablewrap{border:1px solid var(--border);border-radius:11px;overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
 th,td{text-align:right;padding:11px;border-bottom:1px solid var(--grid);font-variant-numeric:tabular-nums}
 th:first-child,td:first-child,th.l,td.l{text-align:left;font-variant-numeric:normal}
-th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.045em;white-space:nowrap}
-tbody tr{cursor:pointer}
-tbody tr:hover{background:var(--surface-2)}
+th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.045em;white-space:nowrap}
+tbody tr.click{cursor:pointer}
+tbody tr.click:hover{background:var(--surface-2)}
 tbody tr:last-child td{border-bottom:0}
 tbody tr.sel{background:color-mix(in srgb,var(--s1) 10%,var(--surface-1))}
 .act{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:7px;
@@ -193,23 +233,23 @@ button.act{cursor:pointer;font:inherit;padding:0}
 tbody tr:hover .act.del{border-color:var(--border);color:var(--muted)}
 tbody tr .act.del:hover{border-color:var(--crit);color:var(--crit)}
 .actions{display:inline-flex;gap:6px}
-.st{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:5px;color:#fff;
+.st{display:inline-block;font-size:11px;font-weight:700;padding:1px 6px;border-radius:5px;color:#fff;
   min-width:36px;text-align:center;letter-spacing:.02em}
-.filters{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:16px;margin-bottom:14px}
+.filters{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:6px;margin-bottom:12px}
 .chipset{display:flex;flex-wrap:wrap;border:1px solid var(--border);border-radius:8px;overflow:hidden}
 .chipset button{background:var(--surface-1);border:0;border-right:1px solid var(--border);padding:7px 13px;
-  font:inherit;font-size:12.5px;color:var(--ink2);cursor:pointer}
+  font:inherit;font-size:13px;color:var(--ink2);cursor:pointer}
 .chipset button:last-child{border-right:0}
 .chipset button[aria-pressed="true"]{background:var(--s1);color:#fff;font-weight:600}
-.search{background:var(--surface-1);border:1px solid var(--border);border-radius:8px;padding:7px 12px;
-  font:inherit;font-size:12.5px;color:var(--ink);width:200px}
-.kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--grid);font-size:13px}
+.search{background:var(--surface-1);border:1px solid var(--ctl);border-radius:8px;padding:7px 12px;
+  font:inherit;font-size:13px;color:var(--ink);width:240px}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--grid);font-size:13.5px}
 .kv:last-child{border-bottom:0}
-.kv span:first-child{color:var(--muted)}
+.kv span:first-child{color:var(--muted);display:flex;align-items:center}
 .kv span:last-child{font-weight:550;font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere}
 
 /* ---------- alertas ---------- */
-.alert{display:flex;gap:11px;border-radius:10px;padding:12px 13px;font-size:12.5px;line-height:1.5;margin-top:16px}
+.alert{display:flex;gap:11px;border-radius:10px;padding:12px 13px;font-size:13px;line-height:1.5;margin-top:16px}
 .alert .m{flex:none;width:19px;height:19px;border-radius:50%;display:grid;place-items:center;
   font-size:11px;font-weight:700;margin-top:1px;background:var(--warn);color:#3a2700}
 .alert.w{background:color-mix(in srgb,var(--warn) 13%,var(--surface-1));border:1px solid color-mix(in srgb,var(--warn) 50%,transparent)}
@@ -222,78 +262,159 @@ tbody tr .act.del:hover{border-color:var(--crit);color:var(--crit)}
 .alert .ti{font-weight:650;display:block;margin-bottom:2px}
 .alert ul{margin:4px 0 0;padding-left:18px}
 
-/* ---------- procesando ---------- */
-.proc{display:grid;gap:11px;margin-top:4px}
-.pstep{display:flex;gap:11px;align-items:center;font-size:13px;color:var(--muted)}
-.pstep .dot{width:20px;height:20px;border-radius:50%;border:2px solid var(--axis);display:grid;place-items:center;
-  font-size:11px;flex:none;color:#fff}
-.pstep.done{color:var(--ink2)}
-.pstep.done .dot{background:var(--good);border-color:var(--good)}
-.pstep.now{color:var(--ink);font-weight:600}
-.pstep.now .dot{border-color:var(--s1);border-top-color:transparent;animation:rot .8s linear infinite}
+/* ---------- pasos del análisis ---------- */
+.steps{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
+.steps li{display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:start;padding:8px 10px;border-radius:9px;
+  font-size:14px;color:var(--muted)}
+.steps li .dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--axis);display:grid;place-items:center;
+  font-size:12px;font-weight:700;color:#fff}
+.steps li .tx b{display:block;font-weight:600}
+.steps li .tx span{display:block;font-size:12.5px;margin-top:1px}
+.steps li .sec{font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted);padding-top:3px}
+.steps li.done{color:var(--ink2)}
+.steps li.done .dot{background:var(--good);border-color:var(--good)}
+.steps li.running{color:var(--ink);background:color-mix(in srgb,var(--s1) 7%,transparent)}
+.steps li.running .dot{border-color:var(--s1);border-top-color:transparent;animation:rot .8s linear infinite}
+.steps li.failed{color:var(--ink);background:color-mix(in srgb,var(--crit) 9%,transparent)}
+.steps li.failed .dot{background:var(--crit);border-color:var(--crit)}
+.steps li.failed .tx span{color:var(--crit);font-weight:550}
+.procmsg{margin-top:14px;font-size:13.5px;line-height:1.5;color:var(--ink2)}
+.procmsg.ok{color:var(--ok-text);font-weight:600}
+.procmsg.x{color:var(--crit);font-weight:600}
 
 /* ---------- visor y revisión ---------- */
-.sigbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:11px}
+.viewtabs{display:flex;gap:4px;margin-top:18px;border-bottom:1px solid var(--border)}
+.viewtabs button{background:none;border:0;border-bottom:2.5px solid transparent;padding:10px 14px 9px;font:inherit;
+  font-size:14px;color:var(--ink2);cursor:pointer;margin-bottom:-1px}
+.viewtabs button[aria-selected="true"]{color:var(--ink);font-weight:650;border-bottom-color:var(--s1)}
+.viewtabs button small{color:var(--muted);font-weight:400;margin-left:4px}
+.sigbar{display:flex;gap:10px 16px;align-items:center;flex-wrap:wrap;margin-bottom:11px}
 .sigbar .now{font-size:13px;font-variant-numeric:tabular-nums;font-weight:600}
-.navbtn{width:30px;height:30px;border-radius:8px;border:1px solid var(--border);background:var(--surface-1);
-  color:var(--ink2);font:inherit;font-size:14px;cursor:pointer;display:grid;place-items:center;flex:none}
-.navbtn:hover{border-color:var(--s1);color:var(--s1)}
-.navbtn[disabled]{opacity:.4;cursor:default;border-color:var(--border);color:var(--muted)}
-.slegend{display:flex;gap:13px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--ink2);margin-bottom:9px}
+.ctlgroup{display:inline-flex;gap:6px;align-items:center}
+.ctllbl{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.zbtn{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 10px;border-radius:8px;border:1px solid var(--ctl);
+  background:var(--surface-1);color:var(--ink);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.zbtn b{font-size:15px;line-height:1}
+.zbtn:hover{border-color:var(--s1);color:var(--s1)}
+.zbtn[disabled]{color:var(--muted);border-color:var(--border);cursor:default}
+.zout{font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink);min-width:118px;text-align:center;
+  background:var(--surface-2);border-radius:7px;padding:5px 8px;border:1px solid var(--border)}
+.slegend{display:flex;gap:13px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--ink2);margin-bottom:9px}
 .slegend i{width:12px;height:12px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-2px}
 .ws{display:grid;gap:16px;margin-top:14px}
-@media(min-width:1000px){ .ws{grid-template-columns:minmax(0,1fr) 296px} }
+@media(min-width:1000px){ .ws{grid-template-columns:minmax(0,1fr) 340px} }
 .chtoggles{display:inline-flex;gap:5px;flex-wrap:wrap}
 .chtoggles button{border:1px solid var(--border);background:var(--surface-1);border-radius:7px;padding:4px 9px;
-  font:inherit;font-size:11.5px;font-weight:600;color:var(--muted);cursor:pointer}
+  font:inherit;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer}
 .chtoggles button[aria-pressed="true"]{color:var(--ink);border-color:color-mix(in srgb,var(--s1) 60%,transparent);
   background:color-mix(in srgb,var(--s1) 8%,var(--surface-1))}
 .chtoggles button.unused::after{content:" ·";color:var(--muted)}
 .insp{border:1px solid var(--border);border-radius:12px;padding:15px;background:var(--surface-2);align-self:start}
-.insp .ep{font-weight:650;font-size:14.5px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
-.insp .tm{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
-.insp h4{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin:14px 0 6px}
-.pbar{display:grid;grid-template-columns:40px 1fr 40px;gap:8px;align-items:center;font-size:12px;margin:4px 0;
+.insp .ep{font-weight:650;font-size:15px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.insp .tm{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.insp h4{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin:16px 0 7px;
+  display:flex;align-items:center}
+.ctx{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.ctx > div,.ctx > button{border:1px solid var(--border);border-radius:9px;padding:6px 8px;background:var(--surface-1);text-align:center;min-width:0}
+.ctx > div.cur{border-color:var(--s1);box-shadow:0 0 0 1px var(--s1) inset}
+.ctx .w{font-size:11px;color:var(--muted)}
+.ctx .sv{font-size:15px;font-weight:700;margin:1px 0}
+.ctx .o{font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ctx .edge{font-size:12px;color:var(--muted);padding:9px 0}
+button.ctxbtn{font:inherit;color:inherit;cursor:pointer;width:100%}
+button.ctxbtn:hover{border-color:var(--s1)}
+.top2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.top2 button{border:1.5px solid var(--border);border-radius:10px;background:var(--surface-1);padding:9px 10px;cursor:pointer;
+  font:inherit;color:var(--ink);text-align:left;display:grid;gap:2px;position:relative}
+.top2 button .r{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.top2 button .s{font-size:19px;font-weight:700;display:flex;align-items:center;gap:7px}
+.top2 button .s i{width:11px;height:11px;border-radius:3px;display:inline-block}
+.top2 button .p{font-size:12.5px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.top2 button:hover:not(:disabled){border-color:var(--s1)}
+.top2 button[aria-pressed="true"]{border-color:var(--s1);background:color-mix(in srgb,var(--s1) 9%,var(--surface-1))}
+.top2 button[aria-pressed="true"]::after{content:"✓";position:absolute;top:7px;right:9px;color:var(--s1);font-weight:700}
+.top2 button:disabled{cursor:not-allowed;opacity:.6}
+.otherlbl{font-size:12px;color:var(--muted);margin:10px 0 5px}
+.pbar{display:grid;grid-template-columns:40px 1fr 42px;gap:8px;align-items:center;font-size:12.5px;margin:4px 0;
   font-variant-numeric:tabular-nums}
 .pbar .tr{height:9px;border-radius:5px;background:var(--surface-3);overflow:hidden}
 .pbar .fi{height:100%;border-radius:5px;transition:width .2s ease}
 .pbar span:last-child{text-align:right;color:var(--ink2)}
 .pbar.top span:first-child{font-weight:700}
 .stagebtns{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
-.stagebtns button{border:1px solid var(--border);border-radius:8px;background:var(--surface-1);padding:7px 0 5px;
+.stagebtns button{border:1px solid var(--border);border-radius:8px;background:var(--surface-1);padding:6px 0 4px;
   font:inherit;font-size:13px;font-weight:650;color:var(--ink);cursor:pointer;position:relative;
   display:flex;flex-direction:column;align-items:center;gap:1px}
-.stagebtns button small{font-size:9.5px;color:var(--muted);font-weight:500}
+.stagebtns button small{font-size:10px;color:var(--muted);font-weight:500}
 .stagebtns button[aria-pressed="true"]{color:#fff;border-color:transparent}
-.stagebtns button[aria-pressed="true"] small{color:rgba(255,255,255,.8)}
-.stagebtns button.sug::after{content:"";position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;
-  background:var(--warn)}
+.stagebtns button[aria-pressed="true"] small{color:rgba(255,255,255,.85)}
 .stagebtns button:disabled{cursor:not-allowed;opacity:.5}
-.ibtns{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
-.ibtns .ghost{flex:1;padding:7px 8px;font-size:12px}
+.ibtns{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.ibtns .ghost{flex:1;padding:7px 8px;font-size:12.5px}
 .inav{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px}
-.inav .ghost{font-size:12px;padding:6px 6px}
-.chk{display:flex;gap:7px;align-items:center;font-size:12px;color:var(--ink2);margin-top:11px;cursor:pointer}
+.inav .ghost{font-size:12.5px;padding:6px 6px}
+.chk{display:flex;gap:7px;align-items:center;font-size:12.5px;color:var(--ink2);margin-top:11px;cursor:pointer}
+/* evidencia espectral */
+.evid{border:1px solid var(--border);border-radius:10px;background:var(--surface-1);padding:10px 11px}
+.evid .head{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:12.5px;color:var(--ink2)}
+.evid select{font:inherit;font-size:12.5px;color:var(--ink);background:var(--surface-1);border:1px solid var(--ctl);border-radius:6px;padding:2px 4px}
+.band{display:grid;grid-template-columns:92px 1fr 44px;gap:8px;align-items:center;margin-top:9px;font-size:12.5px}
+.band .bn{display:flex;align-items:center;font-weight:600;color:var(--ink2);white-space:nowrap}
+.band .bt{position:relative;height:12px;border-radius:6px;background:var(--surface-3)}
+.band .bt .fi{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:var(--ink2);opacity:.75}
+.band .bt .mk{position:absolute;top:-3px;bottom:-3px;width:3px;border-radius:2px;transform:translateX(-1px)}
+.mk.c1{background:var(--s2)} .mk.c2{background:var(--corr)}
+.evleg i.c1{background:var(--s2)} .evleg i.c2{background:var(--corr)}
+.band .bv{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)}
+.evleg{display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-top:9px}
+.evleg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.evhint{font-size:12.5px;color:var(--ink);margin-top:9px;padding-top:8px;border-top:1px solid var(--grid)}
 .kbd{display:inline-block;min-width:18px;padding:0 5px;border:1px solid var(--border);border-bottom-width:2px;
-  border-radius:5px;font-size:10.5px;font-weight:600;color:var(--ink2);background:var(--surface-1);text-align:center;
+  border-radius:5px;font-size:11px;font-weight:600;color:var(--ink2);background:var(--surface-1);text-align:center;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.6}
-.kbdhelp{font-size:11.5px;color:var(--muted);margin-top:12px;display:flex;gap:12px;flex-wrap:wrap}
+.kbdhelp{font-size:12px;color:var(--muted);margin-top:12px;display:flex;gap:12px;flex-wrap:wrap}
 .revbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:12px}
-.revbar .txt{font-size:12.5px;color:var(--ink2)}
+.revbar .txt{font-size:13px;color:var(--ink2)}
 .progress{height:8px;border-radius:5px;background:var(--surface-3);overflow:hidden;min-width:160px;flex:1;max-width:340px}
 .progress i{display:block;height:100%;background:var(--good);border-radius:5px;transition:width .3s ease}
 .queue{max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:11px}
 .queue thead th{position:sticky;top:0;background:var(--surface-1);z-index:1}
 .queue td,.queue th{padding:8px 10px}
-.cm{border-collapse:separate;border-spacing:3px;width:auto;font-size:12px}
+.cm{border-collapse:separate;border-spacing:3px;width:auto;font-size:12.5px}
 .cm td,.cm th{padding:0;border:0;text-align:center;font-variant-numeric:tabular-nums}
 .cm td{width:62px;height:40px;border-radius:6px;font-weight:600;cursor:default}
-.cm th{font-size:10.5px;color:var(--muted);text-transform:none;letter-spacing:0;padding:0 6px}
+.cm th{font-size:11px;color:var(--muted);text-transform:none;letter-spacing:0;padding:0 6px}
 .cmwrap{overflow-x:auto}
-.hist{max-height:220px;overflow:auto;font-size:12.5px;border:1px solid var(--border);border-radius:10px;padding:4px 12px}
-.hist div{padding:6px 0;border-bottom:1px solid var(--grid);color:var(--ink2)}
+.hist{max-height:280px;overflow:auto;font-size:13px;border:1px solid var(--border);border-radius:10px;padding:4px 12px}
+.hist div{padding:7px 0;border-bottom:1px solid var(--grid);color:var(--ink2)}
 .hist div:last-child{border-bottom:0}
 .hist time{color:var(--muted);font-variant-numeric:tabular-nums;margin-right:8px}
+.hist .chg{font-variant-numeric:tabular-nums;color:var(--ink)}
+
+/* arquitectura del sueño (legible a 100 %) */
+.archgrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.arch{border:1px solid var(--border);border-radius:11px;padding:12px 14px;background:var(--surface-1)}
+.arch .k{font-size:13px;color:var(--ink2);font-weight:600;display:flex;align-items:center;line-height:1.3}
+.arch .v{font-size:24px;font-weight:650;margin-top:4px;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
+.arch .v small{font-size:15px;font-weight:500;color:var(--ink2);margin-left:2px}
+.arch .n{font-size:13px;color:var(--muted);margin-top:1px}
+.stagetbl{font-size:15px}
+.stagetbl td,.stagetbl th{padding:10px 12px}
+.stagetbl th{font-size:12px}
+.stagetbl td:first-child{font-weight:600}
+
+/* notas */
+.notebox{display:grid;gap:8px}
+.notebox textarea{width:100%;min-height:76px;resize:vertical;background:var(--surface-1);color:var(--ink);border:1px solid var(--ctl);
+  border-radius:10px;padding:10px 12px;font-size:14px;line-height:1.5}
+.notebar{display:flex;gap:10px;align-items:center;justify-content:flex-end}
+.notebar .cnt{font-size:12px;color:var(--muted);margin-right:auto}
+.notes{margin-top:14px;display:grid;gap:8px}
+.note{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--surface-2)}
+.note .who{font-size:12.5px;color:var(--muted);margin-bottom:3px}
+.note .who b{color:var(--ink2)}
+.note .tx{font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere}
+
 .toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);z-index:90;background:var(--ink);color:var(--page);
   padding:10px 16px;border-radius:10px;font-size:13px;box-shadow:var(--shadow);opacity:0;pointer-events:none;
   transition:opacity .2s ease,transform .2s ease;max-width:min(560px,92vw)}
@@ -303,13 +424,23 @@ tbody tr .act.del:hover{border-color:var(--crit);color:var(--crit)}
 /* ---------- modal ---------- */
 .modal{position:fixed;inset:0;background:rgba(11,11,11,.45);display:grid;place-items:center;z-index:60;padding:20px}
 .mbox{width:100%;max-width:430px;background:var(--surface-1);border:1px solid var(--border);
-  border-radius:15px;padding:24px 24px 20px;box-shadow:var(--shadow)}
-.mbox h3{font-size:16px}
-.mtext{font-size:13px;color:var(--ink2);margin:9px 0 20px;line-height:1.6}
+  border-radius:15px;padding:24px 24px 20px;box-shadow:var(--shadow);max-height:calc(100vh - 40px);overflow:auto}
+.mbox.wide{max-width:600px}
+.mbox h3{font-size:17px}
+.mtext{font-size:13.5px;color:var(--ink2);margin:9px 0 18px;line-height:1.6}
 .mtext b{color:var(--ink)}
-.mbtns{display:flex;gap:10px;justify-content:flex-end}
+.mbtns{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:18px}
 .mbtns .cta{padding:10px 20px;font-size:13.5px}
 .cta.danger{background:var(--crit)}
+.fincounts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.fincounts div{border:1px solid var(--border);border-radius:10px;padding:9px 11px;background:var(--surface-2)}
+.fincounts .k{font-size:12px;color:var(--muted);font-weight:600}
+.fincounts .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
+.finlist{margin-top:14px;max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:10px}
+.finlist table{font-size:13.5px}
+.finlist td,.finlist th{padding:8px 10px}
+.finlist thead th{position:sticky;top:0;background:var(--surface-1)}
+.finlist .ghost{padding:4px 10px;font-size:12px}
 
 /* ---------- login ---------- */
 #vLogin{min-height:86vh;display:grid;place-items:center}
@@ -320,13 +451,13 @@ tbody tr .act.del:hover{border-color:var(--crit);color:var(--crit)}
 .card .brand .wm{font-size:23px;font-weight:650;letter-spacing:-0.025em}
 .card .brand .un{font-size:12px;color:var(--muted);text-align:center;line-height:1.4}
 .card h2{font-size:16px;margin-bottom:3px}
-.card .lead{font-size:12.5px;color:var(--muted);margin-bottom:20px}
+.card .lead{font-size:13px;color:var(--muted);margin-bottom:20px}
 .card .fld{margin-bottom:14px}
 .card .fld input{width:100%;font-size:14px}
 .card .cta{width:100%;margin-top:6px}
-.card .foot{font-size:11.5px;color:var(--muted);margin-top:18px;text-align:center;line-height:1.5}
+.card .foot{font-size:12px;color:var(--muted);margin-top:18px;text-align:center;line-height:1.5}
 .card .tgl{position:absolute;top:16px;right:16px}
-.disclaimer{margin-top:34px;text-align:center;font-size:11.5px;color:var(--muted)}
+.disclaimer{margin-top:34px;text-align:center;font-size:12px;color:var(--muted)}
 .tgl{width:34px;height:34px;border-radius:50%;border:1px solid var(--border);background:var(--surface-2);color:var(--ink2);
   cursor:pointer;display:grid;place-items:center;padding:0;flex:none}
 .tgl:hover{color:var(--ink);border-color:var(--s1)}
@@ -350,26 +481,18 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
   section:not(.hidden){animation:viewIn .3s ease both}
   .cta:not([disabled]):hover{transform:translateY(-1px);box-shadow:0 6px 18px color-mix(in srgb,var(--s1) 30%,transparent)}
   .cta{transition:transform .15s ease,box-shadow .2s ease,filter .2s ease}
-  .tile{transition:transform .2s ease,box-shadow .2s ease}
-  .tile:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
-  .tiles .tile{animation:viewIn .35s ease both}
-  .tiles .tile:nth-child(2){animation-delay:.06s}
-  .tiles .tile:nth-child(3){animation-delay:.12s}
-  .tiles .tile:nth-child(4){animation-delay:.18s}
   @keyframes rowIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
   tbody tr.anim{animation:rowIn .3s ease both;animation-delay:calc(var(--i,0)*35ms)}
   @keyframes fadeIn{from{opacity:0}}
   @keyframes popIn{from{opacity:0;transform:translateY(12px) scale(.96)}}
   .modal{animation:fadeIn .18s ease}
   .mbox{animation:popIn .24s cubic-bezier(.2,.9,.3,1.15)}
-  .filerow.demo{transition:transform .15s ease,border-color .2s ease}
-  .filerow.demo:hover{transform:translateX(3px)}
-  .stagebtns button{transition:transform .12s ease,background-color .15s ease}
-  .stagebtns button:not(:disabled):active{transform:scale(.95)}
+  .stagebtns button,.top2 button{transition:transform .12s ease,background-color .15s ease,border-color .15s ease}
+  .stagebtns button:not(:disabled):active,.top2 button:not(:disabled):active{transform:scale(.96)}
 }
-/* tooltip flotante */
+/* tooltip flotante de los gráficos */
 .tipbox{position:fixed;z-index:80;pointer-events:none;background:var(--surface-1);border:1px solid var(--border);
-  border-radius:9px;padding:8px 12px;font-size:12px;line-height:1.55;color:var(--ink2);
+  border-radius:9px;padding:8px 12px;font-size:12.5px;line-height:1.55;color:var(--ink2);
   box-shadow:0 8px 28px rgba(0,0,0,.16);max-width:290px;font-variant-numeric:tabular-nums;
   opacity:0;transform:translateY(5px) scale(.97);transition:opacity .14s ease,transform .14s ease}
 .tipbox.on{opacity:1;transform:none}
@@ -385,7 +508,8 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
   .sub{display:none}
   .panel{padding:15px}
   .search{width:100%}
-  .search:focus{width:100%}
+  .night .tags{display:none}
+  .fincounts{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -397,7 +521,7 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
     <div class="logo">MAIA - SomnoAI</div>
     <div class="sub">Universidad de los Andes · Estadificación automática del sueño con canales variables</div>
     <div class="grow"></div>
-    <span class="mpill" id="modelPill" title="Modelo que atiende los análisis"></span>
+    <span class="mpill" id="modelPill"></span>
     <div class="user">
       <button class="tgl" id="btnTheme" title="Cambiar tema" aria-label="Cambiar tema"></button>
       <span class="av" id="userAv">SU</span>
@@ -425,7 +549,7 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
       </div>
     </div>
     <h2>Iniciar sesión</h2>
-    <p class="lead">Estadificación automática del sueño a partir de polisomnografía.</p>
+    <p class="lead">Apoyo a la estadificación del sueño a partir de polisomnografía.</p>
     <div class="fld">
       <label for="usr">Usuario</label>
       <input type="text" id="usr" value="superusuario" autocomplete="username">
@@ -450,16 +574,16 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
   <div class="tiles" style="margin-top:16px">
     <div class="tile"><div class="k">Noches analizadas</div><div class="v" id="tCount">—</div>
       <div class="n" id="tCountN">&nbsp;</div></div>
-    <div class="tile"><div class="k">Por revisar</div><div class="v" id="tTodo">—</div>
+    <div class="tile"><div class="k">Por revisar<span data-info="to_review"></span></div><div class="v" id="tTodo">—</div>
       <div class="n" id="tTodoN">&nbsp;</div></div>
-    <div class="tile"><div class="k">Entregado sin revisión</div><div class="v" id="tCov">—</div>
+    <div class="tile"><div class="k">Entregado sin revisión<span data-info="delivered"></span></div><div class="v" id="tCov">—</div>
       <div class="n">mediana de las noches</div></div>
-    <div class="tile"><div class="k">Revisión completa sugerida</div><div class="v" id="tWhole">—</div>
+    <div class="tile"><div class="k">Revisión completa sugerida<span data-info="full_review"></span></div><div class="v" id="tWhole">—</div>
       <div class="n" id="tWholeN">&nbsp;</div></div>
   </div>
 
   <div class="panel">
-    <h3>Épocas marcadas para revisión, por noche</h3>
+    <h3>Épocas marcadas para revisión, por noche<span data-info="flagged"></span></h3>
     <p class="cap">Un punto por noche analizada. Si el modelo marca más del <b id="nightLimit">27,3 %</b> de una
       noche, se sugiere revisarla completa.</p>
     <div id="c-strip"></div>
@@ -471,7 +595,7 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
         <p class="cap" style="margin-bottom:0">Haga clic en una fila para abrir sus resultados y revisarla.</p></div>
       <button class="cta sm" id="btnNew">+ Analizar nuevo</button>
     </div>
-    <div class="filters">
+    <div class="filters" style="margin-top:16px">
       <div class="chipset" id="filt">
         <button aria-pressed="true" data-f="all">Todos</button>
         <button aria-pressed="false" data-f="todo">Por revisar</button>
@@ -484,12 +608,12 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
     </div>
     <div class="tablewrap">
       <table><thead><tr>
-        <th class="l">Sujeto</th><th class="l">Archivo</th><th class="l">Fecha</th><th class="l">Canales</th>
-        <th>Épocas</th><th>Marcadas</th><th class="l">Revisión</th><th></th>
+        <th class="l">Noche</th><th class="l">Archivo</th><th class="l">Fecha</th><th class="l">Canales</th>
+        <th>Épocas</th><th>Marcadas</th><th class="l">Estado</th><th></th>
       </tr></thead><tbody id="tb"></tbody></table>
     </div>
-    <div class="mini">Cada análisis guarda la predicción del modelo tal como salió y, aparte, las correcciones
-      del especialista con su autor y fecha. Esas correcciones son el insumo para revisar el desempeño del
+    <div class="mini">Cada análisis guarda la predicción del modelo tal como salió y, aparte, las decisiones
+      del especialista con su autor y fecha. Esas decisiones son el insumo para revisar el desempeño del
       modelo y reentrenarlo: <button class="linkbtn" id="btnExportAll" style="margin:0">descargar todas las
       correcciones (.csv)</button>.</div>
   </div>
@@ -498,72 +622,86 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
 <!-- ══════════════ ANALIZAR ══════════════ -->
 <section id="vUp" class="hidden">
   <button class="back" id="backUp">← Volver a registros</button>
-  <div class="stitle" style="margin-top:8px"><h2>Analizar un registro</h2></div>
+  <div class="stitle" style="margin-top:8px"><h2>Analizar una noche</h2></div>
 
   <div class="panel">
-    <h3><span class="stepn">1</span>Elegir el registro</h3>
-    <p class="cap">Una noche de polisomnografía en <b>.edf</b>, o un <b>.zip</b> con el par PSG + hipnograma.
-      El hipnograma es opcional: si viene, sirve de referencia para medir la concordancia y para recortar la
-      ventana de sueño.</p>
-    <div class="drop" id="dz" role="button" tabindex="0">
-      <div class="ic">↑</div>
-      <strong>Arrastre aquí el .edf o el .zip del registro</strong>
-      <div class="hint">máx. <span id="maxMb">600</span> MB · haga clic para buscar</div>
+    <h3><span class="stepn">1</span>Elegir la noche</h3>
+    <p class="cap" id="catCap">Noches de prueba del catálogo. Elija una para cargar sus canales.</p>
+    <div class="filters">
+      <input class="search" id="catSearch" type="search" placeholder="Buscar sujeto, noche o canal…" aria-label="Buscar en el catálogo">
+      <div class="chipset" id="catFilt">
+        <button aria-pressed="true" data-f="all">Todas</button>
+        <button aria-pressed="false" data-f="test">Test</button>
+        <button aria-pressed="false" data-f="subset">Con canales faltantes</button>
+      </div>
+      <span class="grow"></span>
+      <span class="mini" style="margin:0" id="catCount"></span>
+      <button class="linkbtn" id="catRefresh" style="margin:0">Actualizar</button>
     </div>
-    <input type="file" id="fileInput" accept=".edf,.zip" class="hidden">
-    <div class="filerow hidden" id="fileSel">
-      <div class="ic">EDF</div>
-      <div style="min-width:0"><div class="nm" id="fileSelName"></div><div class="mt" id="fileSelMeta"></div></div>
-      <button class="rm" id="fileSelRm" title="Quitar archivo" aria-label="Quitar archivo">×</button>
-    </div>
-    <div class="filerow hidden" id="hypSel">
-      <div class="ic hyp">HIP</div>
-      <div style="min-width:0"><div class="nm" id="hypSelName"></div><div class="mt" id="hypSelMeta"></div></div>
-      <button class="rm" id="hypSelRm" title="Quitar hipnograma" aria-label="Quitar hipnograma">×</button>
-    </div>
-    <button class="linkbtn hidden" id="btnAddHyp">+ Agregar el hipnograma de referencia (.edf)</button>
-    <input type="file" id="hypInput" accept=".edf" class="hidden">
-    <div class="err" id="upErr"></div>
+    <div class="catlist" id="catList" aria-label="Noches del catálogo"><div class="catempty">Cargando el catálogo…</div></div>
 
-    <h4 class="subh" style="font-size:13.5px;margin-top:24px">O pruebe con una noche del dataset</h4>
-    <p class="cap" style="margin-bottom:4px">Noches de Sleep-EDFx guardadas en el servidor. Las del <b>test</b>
-      son de sujetos que el modelo nunca vio.</p>
-    <div id="demoList"><div class="mini">Cargando noches disponibles…</div></div>
+    <div class="uptoggle">
+      <button class="linkbtn" id="btnShowUpload" style="margin:0" aria-expanded="false">¿Tiene su propio registro? Subir un PSG (.edf)</button>
+      <div id="upArea" class="hidden">
+        <p class="cap" style="margin:8px 0 0">Un PSG <b>.edf</b> ya trae todos los canales. El hipnograma (.edf) es
+          opcional y solo sirve como referencia para comparar. También se acepta un .zip con los dos.</p>
+        <div class="drop" id="dz" role="button" tabindex="0">
+          <strong>Arrastre aquí el PSG (.edf) o haga clic para buscarlo</strong>
+          <div class="hint">máx. <span id="maxMb">600</span> MB · el servidor lo revisa y le muestra los canales que encontró</div>
+        </div>
+        <input type="file" id="fileInput" accept=".edf,.zip" class="hidden">
+        <div class="filerow hidden" id="fileSel">
+          <div class="ic">EDF</div>
+          <div style="min-width:0;flex:1"><div class="nm" id="fileSelName"></div><div class="mt" id="fileSelMeta"></div>
+            <div class="upbar hidden" id="upBar"><i style="width:0"></i></div></div>
+          <button class="rm" id="fileSelRm" title="Quitar archivo" aria-label="Quitar archivo">×</button>
+        </div>
+        <div class="filerow hidden" id="hypSel">
+          <div class="ic hyp">HIP</div>
+          <div style="min-width:0"><div class="nm" id="hypSelName"></div><div class="mt" id="hypSelMeta"></div></div>
+          <button class="rm" id="hypSelRm" title="Quitar hipnograma" aria-label="Quitar hipnograma">×</button>
+        </div>
+        <button class="linkbtn hidden" id="btnAddHyp">+ Adjuntar el hipnograma de referencia (.edf, opcional)</button>
+        <input type="file" id="hypInput" accept=".edf" class="hidden">
+        <div class="err" id="upErr" role="alert"></div>
+      </div>
+    </div>
   </div>
 
   <div class="panel hidden" id="cfgPanel">
     <h3><span class="stepn">2</span>Canales para el modelo</h3>
     <p class="cap" id="cfgSource"></p>
+    <div class="chsum" id="chSummary"></div>
     <div class="chgrid" id="chGrid"></div>
+    <div class="unusedch hidden" id="unusedCh"></div>
     <div class="combo" id="comboBox">
       <div>
-        <div class="k">Combinación</div>
+        <div class="k">Combinación<span data-info="combination"></span></div>
         <div class="v" id="comboName">—</div>
         <div class="n" id="comboText"></div>
       </div>
       <div id="c-combos"></div>
     </div>
-    <div class="mini" id="otherCh"></div>
 
-    <h3 class="subh"><span class="stepn">3</span>Ventana de análisis</h3>
+    <h3 class="subh"><span class="stepn">3</span>Ventana de análisis<span data-info="window"></span></h3>
     <p class="cap" style="margin-top:6px">Los registros Sleep Cassette duran hasta 22 h y casi todo es vigilia
-      diurna. El modelo se evaluó sobre la ventana de sueño.</p>
+      diurna. El modelo se evaluó sobre la noche: el periodo con las luces apagadas.</p>
     <div class="seg" id="winMode">
-      <button data-m="reference">Ventana de sueño del hipnograma</button>
+      <button data-m="reference">Noche según el hipnograma</button>
       <button data-m="range">Rango horario</button>
       <button data-m="full">Registro completo</button>
     </div>
     <div class="fields">
       <div class="fld rangeOnly"><label for="winStart">Desde</label><input type="time" id="winStart"></div>
       <div class="fld rangeOnly"><label for="winEnd">Hasta</label><input type="time" id="winEnd"></div>
-      <div class="fld"><label for="lightsOff">Apagado de luces</label><input type="time" id="lightsOff"></div>
+      <div class="fld"><label for="lightsOff">Apagado de luces<span data-info="lights_off"></span></label><input type="time" id="lightsOff"></div>
     </div>
     <div class="mini" id="winHelp"></div>
-    <div class="fields" style="margin-top:20px">
-      <div class="grow"></div>
-      <button class="cta" id="btnRun" disabled>Analizar registro →</button>
+    <div class="runbar">
+      <span class="runmsg" id="runMsg" role="status"></span>
+      <button class="cta" id="btnRun" disabled>Analizar →</button>
     </div>
-    <div class="err" id="runErr"></div>
+    <div class="err" id="runErr" role="alert"></div>
   </div>
 </section>
 
@@ -572,6 +710,10 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
   <button class="back" id="backRes">← Volver a registros</button>
   <div class="stitle" style="margin-top:8px"><h2>Resultados del análisis</h2></div>
 
+  <div class="scope" role="note"><span class="m">i</span><span><b>Herramienta de apoyo a la estadificación del sueño.</b>
+    Entrega los estadios por época, sus probabilidades y evidencia de la señal para que un especialista decida.
+    No entrega diagnósticos ni recomendaciones clínicas.</span></div>
+
   <div class="panel">
     <div style="display:flex;gap:13px;align-items:center;flex-wrap:wrap">
       <div class="filerow" style="margin:0;flex:1;min-width:260px">
@@ -579,161 +721,235 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
         <div style="min-width:0"><div class="nm" id="resFileName"></div><div class="mt" id="resFileMeta"></div></div>
       </div>
       <button class="ghost" id="btnCsv">Exportar hipnograma (.csv)</button>
-      <button class="ghost" id="btnOther">Analizar otro registro</button>
+      <button class="ghost" id="btnOther">Analizar otra noche</button>
     </div>
   </div>
 
   <div class="panel hidden" id="procPanel">
-    <div class="phead"><h3>Analizando el registro</h3><span class="pill run" id="procElapsed"></span></div>
-    <p class="cap" id="procCap">El análisis corre en el servidor; puede salir de esta vista y volver después.</p>
-    <div class="proc" id="procSteps"></div>
+    <div class="phead"><h3>Analizando la noche</h3><span class="pill run" id="procElapsed2"></span></div>
+    <p class="cap">El análisis corre en el servidor; puede salir de esta vista y volver después.</p>
+    <ol class="steps" id="procSteps2"></ol>
   </div>
 
-  <div class="alert c hidden" id="failBox"><span class="m">!</span><span>
-    <span class="ti">El análisis no se pudo completar.</span><span id="failText"></span>
-    <br><button class="linkbtn" id="btnRetry">Volver a intentar con otra configuración</button></span>
+  <div class="panel hidden" id="failBox">
+    <div class="phead"><h3>El análisis no se pudo completar</h3><span class="pill x">Falló</span></div>
+    <p class="cap" id="failText"></p>
+    <ol class="steps" id="failSteps"></ol>
+    <p class="mini">No se guardó ningún resultado de esta noche.</p>
+    <div class="mbtns" style="justify-content:flex-start">
+      <button class="cta sm" id="btnRetry">Reintentar el análisis</button>
+      <button class="ghost" id="btnReconfig">Cambiar la configuración</button>
+    </div>
   </div>
 
   <div id="resBody" class="hidden">
-    <div id="resAlerts"></div>
-
-    <div class="tiles" style="margin-top:16px">
-      <div class="tile"><div class="k">Noche analizada</div><div class="v" id="rEpochs">—</div>
-        <div class="n" id="rEpochsN">&nbsp;</div></div>
-      <div class="tile"><div class="k">Entregado sin revisión</div><div class="v" id="rCov">—</div>
-        <div class="n" id="rCovN">&nbsp;</div></div>
-      <div class="tile"><div class="k">Marcadas para revisar</div><div class="v" id="rFlag">—</div>
-        <div class="n" id="rFlagN">&nbsp;</div></div>
-      <div class="tile"><div class="k" id="rAgrK">Concordancia</div><div class="v" id="rAgr">—</div>
-        <div class="n" id="rAgrN">&nbsp;</div></div>
+    <div class="viewtabs" role="tablist" id="viewTabs">
+      <button role="tab" aria-selected="true" data-tab="clin" id="tabClin">Vista clínica</button>
+      <button role="tab" aria-selected="false" data-tab="perf" id="tabPerf">Desempeño del modelo <small>técnico</small></button>
     </div>
 
-    <!-- hipnograma -->
-    <div class="panel">
-      <div class="phead">
-        <h3>Hipnograma</h3>
-        <span class="grow"></span>
-        <div class="chipset" id="hypView">
-          <button aria-pressed="true" data-v="final">Final (con revisión)</button>
-          <button aria-pressed="false" data-v="predicted">Solo el modelo</button>
-        </div>
-      </div>
-      <p class="cap" id="hypCap">Haga clic en cualquier momento de la noche para revisar esa época.</p>
-      <div class="slegend" id="hypLegend"></div>
-      <div id="c-hypno"></div>
-    </div>
+    <!-- ── vista clínica ── -->
+    <div id="clinView" role="tabpanel" aria-labelledby="tabClin">
+      <div id="resAlerts"></div>
 
-    <!-- revisión -->
-    <div class="panel" id="wsPanel">
-      <div class="phead">
-        <h3>Revisión época a época</h3>
-        <span class="pill" id="revStatus"></span>
-        <span class="grow"></span>
-        <button class="cta sm" id="btnSign">Finalizar revisión</button>
+      <div class="tiles" style="margin-top:16px">
+        <div class="tile"><div class="k">Noche analizada<span data-info="window"></span></div><div class="v" id="rEpochs">—</div>
+          <div class="n" id="rEpochsN">&nbsp;</div></div>
+        <div class="tile"><div class="k">Entregado sin revisión<span data-info="delivered"></span></div><div class="v" id="rCov">—</div>
+          <div class="n" id="rCovN">&nbsp;</div></div>
+        <div class="tile"><div class="k">Marcadas para revisar<span data-info="flagged"></span></div><div class="v" id="rFlag">—</div>
+          <div class="n" id="rFlagN">&nbsp;</div></div>
+        <div class="tile"><div class="k">Estado de la revisión</div><div class="v" id="rStatus" style="font-size:19px;margin-top:7px">—</div>
+          <div class="n" id="rStatusN">&nbsp;</div></div>
       </div>
-      <div class="revbar">
-        <div class="progress" aria-hidden="true"><i id="revProg" style="width:0"></i></div>
-        <span class="txt" id="revText"></span>
-      </div>
-      <div class="ws">
-        <div style="min-width:0">
-          <div class="sigbar">
-            <div class="chipset" id="sigWin">
-              <button data-w="30">30 s</button>
-              <button data-w="90" aria-pressed="true">90 s</button>
-              <button data-w="300">5 min</button>
-              <button data-w="1800">30 min</button>
-            </div>
-            <div class="chtoggles" id="chToggles"></div>
-            <span class="grow"></span>
-            <button class="navbtn" id="gainDown" title="Menos amplitud" aria-label="Menos amplitud">−</button>
-            <button class="navbtn" id="gainUp" title="Más amplitud" aria-label="Más amplitud">+</button>
-            <span class="now" id="sigNow"></span>
+
+      <!-- hipnograma -->
+      <div class="panel">
+        <div class="phead">
+          <h3>Hipnograma<span data-info="hypnogram"></span></h3>
+          <span class="grow"></span>
+          <div class="chipset" id="hypView">
+            <button aria-pressed="true" data-v="final">Final (con revisión)</button>
+            <button aria-pressed="false" data-v="predicted">Solo el modelo</button>
           </div>
-          <div id="c-signal"></div>
         </div>
-        <div class="insp" id="insp"></div>
+        <p class="cap" id="hypCap">Haga clic en cualquier momento de la noche para revisar esa época.</p>
+        <div class="slegend" id="hypLegend"></div>
+        <div id="c-hypno"></div>
       </div>
-      <div class="kbdhelp">
-        <span><span class="kbd">←</span> <span class="kbd">→</span> época</span>
-        <span><span class="kbd">⇧</span>+<span class="kbd">←</span> <span class="kbd">→</span> marcada pendiente</span>
-        <span><span class="kbd">W</span> <span class="kbd">1</span> <span class="kbd">2</span> <span class="kbd">3</span> <span class="kbd">R</span> estadio</span>
-        <span><span class="kbd">Enter</span> confirmar sugerencia</span>
-        <span><span class="kbd">⌫</span> volver a la predicción</span>
-      </div>
-    </div>
 
-    <!-- cola de revisión -->
-    <div class="panel">
-      <div class="phead">
-        <h3>Épocas para revisar</h3>
-        <span class="mini" style="margin:0" id="qCount"></span>
-        <span class="grow"></span>
-        <div class="chipset" id="qFilt">
-          <button aria-pressed="true" data-f="pending">Pendientes</button>
-          <button aria-pressed="false" data-f="flagged">Todas las marcadas</button>
-          <button aria-pressed="false" data-f="changed">Cambiadas</button>
+      <!-- revisión -->
+      <div class="panel" id="wsPanel">
+        <div class="phead">
+          <h3>Revisión época a época<span data-info="epoch"></span></h3>
+          <span class="pill" id="revStatus"></span>
+          <span class="grow"></span>
+          <button class="cta sm" id="btnSign">Finalizar revisión</button>
         </div>
-      </div>
-      <p class="cap">El modelo duda en estas épocas (confianza bajo <span id="thrTxt">0,65</span>) y propone dos
-        opciones; la correcta suele estar entre ellas.</p>
-      <div class="queue">
-        <table><thead><tr>
-          <th class="l">Época</th><th class="l">Hora</th><th class="l">Modelo</th><th class="l">2.ª opción</th>
-          <th class="l">Referencia</th><th class="l">Estado</th>
-        </tr></thead><tbody id="qBody"></tbody></table>
-      </div>
-    </div>
-
-    <!-- arquitectura -->
-    <div class="panel">
-      <h3>Arquitectura del sueño</h3>
-      <p class="cap">Tiempo en cada estadio y métricas clásicas, calculadas sobre la ventana analizada.</p>
-      <div id="c-stages"></div>
-      <div class="tablewrap" style="margin-top:14px">
-        <table id="archTable"></table>
-      </div>
-    </div>
-
-    <!-- concordancia -->
-    <div class="panel" id="agrPanel">
-      <div class="phead">
-        <h3>Concordancia con el hipnograma de referencia</h3>
-        <span class="grow"></span>
-        <div class="chipset" id="cmView">
-          <button aria-pressed="true" data-v="predicted">Modelo</button>
-          <button aria-pressed="false" data-v="final">Final (con revisión)</button>
+        <div class="revbar">
+          <div class="progress" aria-hidden="true"><i id="revProg" style="width:0"></i></div>
+          <span class="txt" id="revText"></span>
+        </div>
+        <div class="ws">
+          <div style="min-width:0">
+            <div class="sigbar">
+              <div class="ctlgroup" role="group" aria-label="Ventana de tiempo del visor">
+                <span class="ctllbl">Tiempo</span>
+                <div class="chipset" id="sigWin">
+                  <button data-w="30" title="Ver una época (30 segundos)">30 s</button>
+                  <button data-w="90" aria-pressed="true" title="Ver la época con la anterior y la siguiente">90 s</button>
+                  <button data-w="300" title="Ver 5 minutos alrededor de la época">5 min</button>
+                  <button data-w="1800" title="Ver 30 minutos alrededor de la época">30 min</button>
+                </div>
+              </div>
+              <div class="ctlgroup" role="group" aria-label="Amplitud de los trazos">
+                <span class="ctllbl">Amplitud<span data-info="amplitude"></span></span>
+                <button class="zbtn" id="gainDown" title="Reducir la amplitud: las ondas se ven más pequeñas"><b>−</b> Reducir</button>
+                <output class="zout" id="gainOut" aria-live="polite"></output>
+                <button class="zbtn" id="gainUp" title="Aumentar la amplitud: las ondas se ven más grandes"><b>+</b> Ampliar</button>
+              </div>
+              <span class="grow"></span>
+              <span class="now" id="sigNow"></span>
+            </div>
+            <div class="chtoggles" id="chToggles" style="margin-bottom:9px"></div>
+            <div id="c-signal"></div>
+          </div>
+          <div class="insp" id="insp"></div>
+        </div>
+        <div class="kbdhelp">
+          <span><span class="kbd">←</span> <span class="kbd">→</span> época</span>
+          <span><span class="kbd">⇧</span>+<span class="kbd">←</span> <span class="kbd">→</span> marcada pendiente</span>
+          <span><span class="kbd">A</span> <span class="kbd">B</span> 1.ª / 2.ª opción</span>
+          <span><span class="kbd">W</span> <span class="kbd">1</span> <span class="kbd">2</span> <span class="kbd">3</span> <span class="kbd">R</span> estadio</span>
+          <span><span class="kbd">Enter</span> confirmar el del modelo</span>
+          <span><span class="kbd">⌫</span> volver al modelo</span>
         </div>
       </div>
-      <p class="cap">La referencia es el hipnograma anotado por expertos (R&amp;K, con 3 y 4 unidos en N3). Las
-        épocas sin estadio en la referencia no cuentan.</p>
-      <div class="tiles" id="agrTiles"></div>
-      <div class="row two" style="margin-top:16px;gap:28px">
-        <div><h4 style="font-size:12.5px;margin-bottom:8px">Matriz de confusión <span class="mini" style="margin:0">
-          (filas: referencia · columnas: <span id="cmCol">modelo</span>)</span></h4>
-          <div class="cmwrap" id="c-cm"></div></div>
-        <div><h4 style="font-size:12.5px;margin-bottom:8px">F1 por estadio</h4><div id="c-f1"></div></div>
+
+      <!-- cola de revisión -->
+      <div class="panel">
+        <div class="phead">
+          <h3>Épocas para revisar<span data-info="flagged"></span></h3>
+          <span class="mini" style="margin:0" id="qCount"></span>
+          <span class="grow"></span>
+          <div class="chipset" id="qFilt">
+            <button aria-pressed="true" data-f="pending">Pendientes</button>
+            <button aria-pressed="false" data-f="flagged">Todas las marcadas</button>
+            <button aria-pressed="false" data-f="changed">Cambiadas</button>
+          </div>
+        </div>
+        <p class="cap">El modelo duda en estas épocas (confianza bajo <span id="thrTxt">0,65</span>) y propone dos
+          opciones; la correcta suele estar entre ellas.</p>
+        <div class="queue">
+          <table><thead><tr>
+            <th class="l">Época</th><th class="l">Hora</th><th class="l">1.ª opción</th><th class="l">2.ª opción</th>
+            <th class="l">Estado</th>
+          </tr></thead><tbody id="qBody"></tbody></table>
+        </div>
+      </div>
+
+      <!-- arquitectura -->
+      <div class="panel">
+        <h3>Arquitectura del sueño</h3>
+        <p class="cap" id="archCap">Calculada sobre el hipnograma final: los estadios que confirmó o corrigió un revisor y,
+          en el resto, los del modelo. Se recalcula con cada cambio.</p>
+        <div class="archgrid" id="archGrid"></div>
+        <div id="c-stages" style="margin-top:18px"></div>
+        <div class="tablewrap" style="margin-top:12px">
+          <table class="stagetbl" id="stageTable"></table>
+        </div>
+      </div>
+
+      <!-- notas -->
+      <div class="panel">
+        <h3>Notas del técnico</h3>
+        <p class="cap">Observaciones propias sobre esta noche. Quedan con su nombre y la fecha, y en la bitácora. La
+          aplicación no genera recomendaciones.</p>
+        <div class="notebox">
+          <label for="noteText" class="hidden">Nueva nota</label>
+          <textarea id="noteText" placeholder="Escriba una observación (artefactos, eventos, contexto de la noche…)"></textarea>
+          <div class="notebar"><span class="cnt" id="noteCnt"></span>
+            <button class="cta sm" id="btnNote" disabled>Guardar nota</button></div>
+        </div>
+        <div class="notes" id="noteList"></div>
+      </div>
+
+      <!-- detalles y bitácora -->
+      <div class="panel">
+        <h3>Detalles del análisis</h3>
+        <p class="cap">Qué noche se analizó, qué parte, con qué canales y con qué modelo.</p>
+        <div class="row three" style="gap:30px">
+          <div><h4 style="font-size:13px;margin-bottom:6px">La noche</h4><div id="kvFile"></div></div>
+          <div><h4 style="font-size:13px;margin-bottom:6px">Lo que se analizó</h4><div id="kvAnalysis"></div></div>
+          <div><h4 style="font-size:13px;margin-bottom:6px">El modelo</h4><div id="kvModel"></div></div>
+        </div>
+        <div id="c-quality" style="margin-top:20px"></div>
+        <h4 style="font-size:13px;margin:20px 0 8px;display:flex;align-items:center">Bitácora<span data-info="audit"></span></h4>
+        <div class="hist" id="histList"></div>
       </div>
     </div>
 
-    <!-- registro y modelo -->
-    <div class="panel">
-      <h3>Registro y modelo</h3>
-      <p class="cap">Qué contiene el archivo, qué parte se analizó y con qué modelo.</p>
-      <div id="c-quality"></div>
-      <div class="row three" style="margin-top:20px;gap:30px">
-        <div><h4 style="font-size:12.5px;margin-bottom:6px">El archivo</h4><div id="kvFile"></div></div>
-        <div><h4 style="font-size:12.5px;margin-bottom:6px">Lo que se analizó</h4><div id="kvAnalysis"></div></div>
-        <div><h4 style="font-size:12.5px;margin-bottom:6px">El modelo</h4><div id="kvModel"></div></div>
+    <!-- ── desempeño del modelo ── -->
+    <div id="perfView" class="hidden" role="tabpanel" aria-labelledby="tabPerf">
+      <p class="mini" style="margin-top:14px">Información técnica para evaluar al modelo. No hace falta para
+        estadificar ni para leer la noche.</p>
+      <div id="perfAlerts"></div>
+
+      <div class="panel">
+        <h3>Desempeño esperado con esta combinación de canales<span data-info="expected"></span></h3>
+        <p class="cap" id="expCap"></p>
+        <div class="combo" style="margin-top:0">
+          <div>
+            <div class="k">Combinación</div>
+            <div class="v" id="expName">—</div>
+            <div class="n" id="expText"></div>
+          </div>
+          <div id="c-combos2"></div>
+        </div>
       </div>
-      <h4 style="font-size:12.5px;margin:20px 0 8px">Bitácora de la revisión</h4>
-      <div class="hist" id="histList"></div>
+
+      <div class="panel" id="agrPanel">
+        <div class="phead">
+          <h3>Acuerdo con el hipnograma de referencia<span data-info="reference"></span></h3>
+          <span class="grow"></span>
+          <div class="chipset" id="cmView">
+            <button aria-pressed="true" data-v="predicted">Modelo</button>
+            <button aria-pressed="false" data-v="final">Final (con revisión)</button>
+          </div>
+        </div>
+        <p class="cap">La referencia es el hipnograma anotado por expertos (R&amp;K, con 3 y 4 unidos en N3). Las
+          épocas sin estadio en la referencia no cuentan.</p>
+        <div class="tiles" id="agrTiles"></div>
+        <div class="row two" style="margin-top:16px;gap:28px">
+          <div><h4 style="font-size:13px;margin-bottom:8px;display:flex;align-items:center">Matriz de confusión<span data-info="confusion"></span></h4>
+            <div class="mini" style="margin:0 0 8px">filas: referencia · columnas: <span id="cmCol">modelo</span></div>
+            <div class="cmwrap" id="c-cm"></div></div>
+          <div><h4 style="font-size:13px;margin-bottom:8px;display:flex;align-items:center">F1 por estadio<span data-info="f1"></span></h4><div id="c-f1"></div></div>
+        </div>
+      </div>
+      <div class="alert i hidden" id="noRef"><span class="m">i</span><span><span class="ti">Esta noche no tiene hipnograma de referencia.</span>
+        Sin una referencia anotada por un experto no se puede medir el acuerdo del modelo en esta noche; arriba
+        queda el desempeño que obtuvo con esta combinación en el conjunto de prueba.</span></div>
+
+      <div class="panel">
+        <h3>Arquitectura del sueño: modelo, final y referencia</h3>
+        <p class="cap">Las mismas métricas calculadas con cada hipnograma, para ver cuánto cambian con la revisión.</p>
+        <div class="tablewrap"><table id="archCompare"></table></div>
+      </div>
+
+      <div class="panel">
+        <h3>Registro técnico</h3>
+        <div class="row two" style="gap:30px;margin-top:10px">
+          <div id="kvTech"></div>
+          <div id="kvTimes"></div>
+        </div>
+      </div>
     </div>
   </div>
 </section>
 
 <div class="disclaimer">SomnoAI · MAIA — Prototipo académico de apoyo a la estadificación del sueño.
-  No es un instrumento de diagnóstico clínico.</div>
+  No entrega diagnósticos ni recomendaciones clínicas.</div>
 
 </div>
 
@@ -748,16 +964,45 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
     </div>
   </div>
 </div>
+
+<!-- ══════════════ avance del análisis ══════════════ -->
+<div class="modal hidden" id="procModal">
+  <div class="mbox wide" role="dialog" aria-modal="true" aria-labelledby="procTitle" aria-describedby="procSub">
+    <div class="phead"><h3 id="procTitle">Analizando la noche</h3><span class="grow"></span><span class="pill run" id="procElapsed"></span></div>
+    <p class="mtext" id="procSub" style="margin-bottom:6px"></p>
+    <ol class="steps" id="procSteps" aria-live="polite"></ol>
+    <div class="procmsg" id="procMsg" role="status"></div>
+    <div class="mbtns" id="procBtns"></div>
+  </div>
+</div>
+
+<!-- ══════════════ resumen antes de finalizar ══════════════ -->
+<div class="modal hidden" id="finModal">
+  <div class="mbox wide" role="dialog" aria-modal="true" aria-labelledby="finTitle">
+    <h3 id="finTitle">Revise sus cambios antes de finalizar</h3>
+    <div class="fincounts">
+      <div><div class="k">Confirmadas</div><div class="v" id="finConf">—</div></div>
+      <div><div class="k">Corregidas</div><div class="v" id="finCorr">—</div></div>
+      <div><div class="k">Marcadas sin revisar</div><div class="v" id="finPend">—</div></div>
+    </div>
+    <div id="finBody"></div>
+    <p class="mtext" id="finText" style="margin-bottom:0"></p>
+    <div class="mbtns">
+      <button class="ghost" id="finCancel">Seguir revisando</button>
+      <button class="cta" id="finConfirm">Finalizar revisión</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <!-- ?v=N evita que el navegador use JS viejo en caché tras una actualización -->
-<script src="js/config.js?v=3"></script>
-<script src="js/charts.js?v=3"></script>
-<script src="js/ui.js?v=3"></script>
-<script src="js/edf.js?v=3"></script>
-<script src="js/mock.js?v=3"></script>
-<script src="js/api.js?v=3"></script>
-<script src="js/review.js?v=3"></script>
-<script src="js/app.js?v=3"></script>
+<script src="js/config.js?v=4"></script>
+<script src="js/charts.js?v=4"></script>
+<script src="js/ui.js?v=4"></script>
+<script src="js/edf.js?v=4"></script>
+<script src="js/mock.js?v=4"></script>
+<script src="js/api.js?v=4"></script>
+<script src="js/review.js?v=4"></script>
+<script src="js/app.js?v=4"></script>
 </body>
 </html>

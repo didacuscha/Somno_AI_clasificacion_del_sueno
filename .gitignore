@@ -7,6 +7,8 @@ __pycache__/
 
 # datos: pesados y con datos de registros (se descargan con backend/data/demo/download_demos.sh)
 backend/data/demo/*.edf
+# noches con canales faltantes que genera backend/scripts/make_subset_nights.py
+backend/data/demo/subsets/
 backend/data/store/
 
 # temporales

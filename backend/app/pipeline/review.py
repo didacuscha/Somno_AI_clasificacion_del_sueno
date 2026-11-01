@@ -1,23 +1,35 @@
 """Regla de confianza y revisión del especialista.
 
-La confianza de una época es la probabilidad del estadio elegido. Si queda bajo el
-umbral, la época se marca «revisar» y se ofrecen la 1.ª y la 2.ª opción (informe,
-sección III). El especialista confirma o corrige épocas; el hipnograma final es la
-predicción con esas correcciones encima. Las métricas se recalculan sobre él.
+La confianza de una época es la probabilidad del estadio que eligió el modelo. Si
+queda bajo el umbral, la época se marca «revisar» y se ofrecen la 1.ª y la 2.ª
+opción (informe, sección III). El especialista confirma o corrige épocas; el
+hipnograma final es la predicción con esas decisiones encima, y las métricas de la
+noche se recalculan sobre él.
+
+Estado de la noche (review.status):
+  to_review              analizada, a la espera del especialista
+  full_review_suggested  ídem, pero se marcó más del 27,3 % de la noche
+  in_review              el especialista ya confirmó o corrigió alguna época
+  finalized              revisión finalizada (se puede reabrir)
 """
 import numpy as np
 
 from . import metrics
 
+STATUSES = ("to_review", "full_review_suggested", "in_review", "finalized")
 
-def decide(probs: np.ndarray, threshold: float) -> dict:
+
+def decide(stages, probs, threshold: float) -> dict:
     """Estadio, 2.ª opción, confianza y marca de revisión de cada época."""
     p = np.asarray(probs, dtype=float)
-    order = np.argsort(-p, axis=1, kind="stable")
-    conf = p.max(axis=1)
+    s = np.asarray(stages, dtype=int)
+    rows = np.arange(len(s))
+    conf = p[rows, s]
+    others = p.copy()
+    others[rows, s] = -1.0
     return {
-        "stage": order[:, 0].astype(int).tolist(),
-        "second": order[:, 1].astype(int).tolist(),
+        "stage": s.tolist(),
+        "second": others.argmax(axis=1).astype(int).tolist(),
         "confidence": np.round(conf, 3).tolist(),
         "review": (conf < threshold).astype(int).tolist(),
         "probs": np.round(p, 3).tolist(),
@@ -32,30 +44,51 @@ def final_stages(predicted: list[int], corrections: dict[int, int]) -> list[int]
     return out
 
 
-def state(epochs: dict, corrections: dict[int, int], signed: dict, night_fraction: float) -> dict:
-    """Avance de la revisión: marcadas, resueltas (confirmadas o corregidas) y firma."""
+def state(epochs: dict, corrections: dict[int, int], finalized: dict, night_fraction: float) -> dict:
+    """Avance de la revisión: marcadas, resueltas, confirmadas, corregidas y estado de la noche."""
     pred = epochs["stage"]
     flagged = [i for i, f in enumerate(epochs["review"]) if f]
     resolved = [i for i in flagged if i in corrections]
-    confirmed = sum(1 for i in resolved if corrections[i] == pred[i])
-    changed = sum(1 for i, s in corrections.items() if s != pred[i])
     n = len(pred)
-    if signed.get("by"):
-        status = "signed_off"
+    whole = bool(n and len(flagged) / n > night_fraction)
+    if finalized.get("by"):
+        status = "finalized"
+    elif corrections:
+        status = "in_review"
     else:
-        status = "in_progress" if corrections else "pending"
+        status = "full_review_suggested" if whole else "to_review"
     return {
         "status": status,
         "n_epochs": n,
         "flagged": len(flagged),
         "flagged_fraction": round(len(flagged) / n, 4) if n else 0.0,
-        "whole_night_recommended": bool(n and len(flagged) / n > night_fraction),
+        "whole_night_recommended": whole,
         "resolved": len(resolved),
         "pending": len(flagged) - len(resolved),
-        "confirmed": confirmed,
-        "corrected": changed,
-        "signed_off_by": signed.get("by"),
-        "signed_off_at": signed.get("at"),
+        "confirmed": sum(1 for i, s in corrections.items() if s == pred[i]),
+        "corrected": sum(1 for i, s in corrections.items() if s != pred[i]),
+        "finalized_by": finalized.get("by"),
+        "finalized_at": finalized.get("at"),
+    }
+
+
+def changes(detail: dict, corrections: dict[int, dict]) -> dict:
+    """Resumen antes de finalizar: cuántas épocas confirmó y corrigió el revisor, y la
+    lista de correcciones (época, estadio del modelo, estadio del revisor)."""
+    ep, night = detail["epochs"], detail["night"]
+    pred = ep["stage"]
+    t0 = night.get("start_clock_s")
+    corrected = [
+        {"epoch": i, "clock_s": t0 + i * night["epoch_s"] if t0 is not None else None,
+         "model_stage": pred[i], "reviewer_stage": c["stage"], "flagged": bool(ep["review"][i]),
+         "author": c["author"], "at": c["at"]}
+        for i, c in sorted(corrections.items()) if c["stage"] != pred[i]]
+    flagged = [i for i, f in enumerate(ep["review"]) if f]
+    return {
+        "confirmed": sum(1 for i, c in corrections.items() if c["stage"] == pred[i]),
+        "corrected": len(corrected),
+        "pending": sum(1 for i in flagged if i not in corrections),
+        "changes": corrected,
     }
 
 
