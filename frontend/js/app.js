@@ -32,6 +32,10 @@
     document.documentElement.dataset.theme = t;
     try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* almacenamiento bloqueado */ }
     themeButtons().forEach(b => { b.innerHTML = t === "dark" ? ICONS.light : ICONS.dark; });
+    if (rerender) {                       // el icono nuevo entra girando (sol ↔ luna)
+      themeButtons().forEach(b => MaiaFX.play(b.firstElementChild,
+        [{ transform: "rotate(-120deg) scale(.4)", opacity: 0 }, { transform: "none", opacity: 1 }], { duration: 300 }));
+    }
     if (rerender) {                       // los SVG leen los colores al dibujarse
       if (!$("vList").classList.contains("hidden") && records.length) renderStrip();
       if (!$("vUp").classList.contains("hidden")) updateCombo();
@@ -55,16 +59,44 @@
     requestAnimationFrame(step);
   }
 
-  /* ── navegación entre vistas ── */
-  function go(v) {
-    ["vList", "vUp", "vRes"].forEach(id => $(id).classList.toggle("hidden", id !== v));
-    document.querySelectorAll("nav button").forEach(b =>
-      b.setAttribute("aria-selected", String(b.dataset.v === v || (v === "vRes" && b.dataset.v === "vList"))));
-    if (v !== "vRes") MaiaReview.stopPolling();
-    if (v !== "vList") clearTimeout(listTimer);
-    if (v === "vList") refreshList();
-    if (v === "vUp") loadCatalog();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  /* ── navegación entre vistas ──
+     Con View Transitions (si el navegador la tiene y no se pidió reducir movimiento) la vista
+     saliente y la entrante se encadenan con un deslizamiento corto; opts.shared (la fila de
+     Registros) se transforma en la tarjeta del encabezado de resultados. El cambio de DOM llega
+     un cuadro después: go() devuelve una promesa que se cumple cuando la vista ya está visible. */
+  const VIEWS = ["vList", "vUp", "vRes"];
+  const useVT = !!document.startViewTransition && MaiaFX.enabled();
+  if (useVT) document.documentElement.classList.add("has-vt");     // la transición reemplaza al viewIn de CSS
+  function go(v, { shared } = {}) {
+    const apply = vt => {
+      VIEWS.forEach(id => $(id).classList.toggle("hidden", id !== v));
+      document.querySelectorAll("nav button").forEach(b =>
+        b.setAttribute("aria-selected", String(b.dataset.v === v || (v === "vRes" && b.dataset.v === "vList"))));
+      if (v !== "vRes") MaiaReview.stopPolling();
+      if (v !== "vList") clearTimeout(listTimer);
+      if (v === "vList") refreshList();
+      if (v === "vUp") loadCatalog();
+      window.scrollTo({ top: 0, behavior: vt ? "instant" : "smooth" });
+    };
+    const from = VIEWS.find(id => !$(id).classList.contains("hidden"));
+    if (!useVT || !MaiaFX.enabled() || from === v) { apply(false); return Promise.resolve(); }
+    const root = document.documentElement;
+    root.dataset.vtdir = from && VIEWS.indexOf(v) < VIEWS.indexOf(from) ? "back" : "fwd";
+    if (shared) shared.style.viewTransitionName = "rec";
+    let t;
+    try {
+      t = document.startViewTransition(() => {
+        if (shared) shared.style.viewTransitionName = "";
+        if (shared && v === "vRes") $("resCard").style.viewTransitionName = "rec";
+        apply(true);
+      });
+    } catch (e) {                         // p. ej. dos elementos con el mismo nombre: sin transición
+      if (shared) shared.style.viewTransitionName = "";
+      apply(false);
+      return Promise.resolve();
+    }
+    Promise.resolve(t.finished).catch(() => {}).then(() => { $("resCard").style.viewTransitionName = ""; delete root.dataset.vtdir; });
+    return Promise.resolve(t.updateCallbackDone).catch(() => {});
   }
 
   MaiaReview.init({ go, onChange: () => {} });
@@ -131,7 +163,9 @@
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m5 5v6m4-6v6"/></svg>
           </button><span class="act" aria-hidden="true">→</span></span></td>`;
-      tr.onclick = () => MaiaReview.open(r.id);
+      // la fila se transforma en el encabezado de resultados (y su nombre ya se ve mientras carga)
+      tr.onclick = () => MaiaReview.open(r.id, { shared: tr,
+        label: r.night_label && r.night_label !== r.file_name ? `${r.night_label} · ${r.file_name}` : r.file_name });
       tr.querySelector(".del").onclick = e => { e.stopPropagation(); askDelete(r); };
       return tr;
     }));
@@ -271,6 +305,9 @@
     U.insp = n.channels;
     U.night = n.split ? n : null;
     renderCatalog();
+    // la noche elegida se marca con un anillo azul que se desvanece
+    const chosen = $("catList").querySelector('.night[aria-pressed="true"]');
+    if (chosen) MaiaFX.ring(chosen, "--s1", 0, getComputedStyle(chosen).boxShadow, 1.01);
     configure();
     $("cfgPanel").scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
   }
@@ -449,6 +486,8 @@
           if (!st.label) { st.on = false; UI.toast(`No queda un canal de ${cfg.channels[slot].kind.toUpperCase()} libre para ${cfg.channels[slot].name}.`); }
         }
         renderChannels();
+        // se intentó encender una entrada sin canal libre (los demás ya están en uso): «no»
+        if (e.target.checked && !st.on) MaiaFX.shake($("chGrid").querySelector(`.chcard[data-slot="${slot}"]`));
       };
       const sel = card.querySelector("select");
       if (sel) sel.onchange = e => {
@@ -480,6 +519,10 @@
         "registro tiene Fpz-Cz o EOG, conviene agregarlos.</span>" : "");
   }
 
+  /* la noche elegida: las barras de combinaciones vuelven a crecer al elegir otra */
+  const sourceKey = () => !U.source ? "none"
+    : U.source.kind === "catalog" ? "cat:" + U.source.night.id : "up:" + U.source.upload.id;
+
   function updateCombo() {
     if (!cfg || !U.source) return;
     const slots = selectedSlots();
@@ -489,12 +532,12 @@
       $("comboName").textContent = "—";
       $("comboText").innerHTML = `<span style="color:var(--crit)">${slots.length ? "Seleccione al menos un EEG (Fpz-Cz o Pz-Oz): " +
         "el EOG y el EMG solo complementan al EEG." : "Seleccione al menos un canal."}</span>`;
-      C.renderCombos($("c-combos"), cfg.expected, names, null, cfg.mf1_goal);
+      C.renderCombos($("c-combos"), cfg.expected, names, null, cfg.mf1_goal, { key: sourceKey() });
     } else {
       const key = keyFor(slots);
       $("comboName").textContent = comboName(slots);
       $("comboText").innerHTML = expectedText(key);
-      C.renderCombos($("c-combos"), cfg.expected, names, key, cfg.mf1_goal);
+      C.renderCombos($("c-combos"), cfg.expected, names, key, cfg.mf1_goal, { key: sourceKey() });
     }
     validate();
   }
@@ -632,6 +675,7 @@
       await enterApp(user);
     } catch (e) {
       showErr($("loginErr"), e.message || "No se pudo iniciar sesión.");
+      MaiaFX.shake(document.querySelector("#vLogin .card"));
     } finally {
       btn.disabled = false;
       btn.textContent = orig;
@@ -715,6 +759,12 @@
   };
   ["winStart", "winEnd", "lightsOff"].forEach(id => $(id).addEventListener("input", renderWindow));
   $("btnRun").onclick = runAnalyze;
+
+  // subrayado que se desliza entre pestañas (navegación y vista clínica / desempeño)
+  MaiaFX.tabInk(document.querySelector("nav"));
+  MaiaFX.tabInk($("viewTabs"));
+  // selectores segmentados (filtros, ventana, vista, tiempo, cola, matriz): la opción elegida se desliza
+  document.querySelectorAll(".chipset, .seg").forEach(MaiaFX.segPill);
 
   window.MaiaApp = { go, refreshList };
 

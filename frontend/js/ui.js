@@ -129,6 +129,8 @@
     el.textContent = msg;
     el.classList.toggle("err", isErr);
     el.classList.add("on");
+    el.classList.remove("shake");                    // los avisos de error se sacuden (cada vez)
+    if (isErr) { void el.offsetWidth; el.classList.add("shake"); }
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.classList.remove("on"), isErr ? 5500 : 2600);
   }
@@ -174,13 +176,22 @@
   }
 
   /* ── pasos del análisis (US-20) ── */
+  /* ✓ y ✕ como trazos SVG: se pueden «dibujar» cuando el paso acaba de terminar */
+  const MARK = {
+    done: '<svg viewBox="0 0 12 12" width="12" height="12"><path pathLength="1" d="M2.4 6.4l2.4 2.4 4.8-5.1"/></svg>',
+    failed: '<svg viewBox="0 0 12 12" width="12" height="12"><path pathLength="1" d="M3.2 3.2l5.6 5.6M8.8 3.2l-5.6 5.6"/></svg>'
+  };
   function steps(el, progress, labels) {
     const list = (progress && progress.steps && progress.steps.length) ? progress.steps
       : (labels || []).map(s => ({ ...s, status: "pending" }));
-    const mark = { done: "✓", failed: "✕", running: "", pending: "" };
     const state = { done: "listo", failed: "falló", running: "en curso", pending: "pendiente" };
-    el.innerHTML = list.map(s => `<li class="${s.status}">
-      <span class="dot" aria-hidden="true">${mark[s.status] || ""}</span>
+    // la lista se redibuja en cada consulta: solo se anima el paso que CAMBIÓ a listo o falló
+    const prev = el._st || null;
+    let j = 0;
+    const just = list.map((s, k) => (prev && prev[k] !== s.status && (s.status === "done" || s.status === "failed")) ? j++ : -1);
+    el._st = list.map(s => s.status);
+    el.innerHTML = list.map((s, k) => `<li class="${s.status}${just[k] >= 0 ? " just" : ""}"${just[k] >= 0 ? ` style="--j:${just[k]}"` : ""}>
+      <span class="dot" aria-hidden="true">${MARK[s.status] || ""}</span>
       <span class="tx"><b>${esc(s.label)}<span class="hidden"> · ${state[s.status] || s.status}</span></b>${s.message ? `<span>${esc(s.message)}</span>` : ""}</span>
       <span class="sec">${s.status === "done" && s.seconds != null ? `${MaiaUtil.nf(s.seconds, 1)} s` : ""}</span></li>`).join("");
   }
