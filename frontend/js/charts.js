@@ -57,6 +57,36 @@
     };
   })();
 
+  /* micro-animaciones (js/fx.js, cargado antes); sin él, las gráficas se dibujan igual */
+  const FX = window.MaiaFX || null;
+
+  /* hover: la marca bajo el puntero se destaca y las demás de su grupo se atenúan */
+  function emphasis(marks) {
+    const clear = () => marks.forEach(o => o.classList.remove("dim", "lift"));
+    marks.forEach(mk => {
+      mk.classList.add("hm");
+      mk.addEventListener("mouseenter", () => marks.forEach(o => {
+        o.classList.toggle("dim", o !== mk);
+        o.classList.toggle("lift", o === mk);
+      }));
+      mk.addEventListener("mouseleave", clear);
+    });
+  }
+
+  /* barras: crecen desde su base al aparecer (entrada) o pasan de su caja anterior (cambio).
+     items = [{el, id, box, base, k}] · base = caja de partida en la entrada · k = orden */
+  function animateBars(m, items, { stagger = 40, enter = 320 } = {}) {
+    if (!FX) return null;
+    const boxes = {};
+    items.forEach(it => { boxes[it.id] = it.box; });
+    const ch = FX.track(m, boxes);
+    items.forEach(it => {
+      if (!ch.from) FX.morphBox(it.el, it.base, it.box, { age: m.age, delay: it.k * stagger, duration: enter });
+      else FX.morphBox(it.el, ch.from[it.id] || it.base, it.box, { age: ch.age });
+    });
+    return ch;
+  }
+
   const svgPt = (svgEl, ev, vbW, vbH) => {
     const r = svgEl.getBoundingClientRect();
     return { x: (ev.clientX - r.left) * (vbW / r.width), y: (ev.clientY - r.top) * (vbH / r.height) };
@@ -100,19 +130,34 @@
     s.appendChild(S("line", { x1: x(limit), x2: x(limit), y1: 28, y2: 64, stroke: CV("--warn-text"), "stroke-width": 1.5 }));
     s.appendChild(T({ x: x(limit) + 6, y: 24, "class": "dlbl", fill: CV("--warn-text") },
       `revisión completa > ${nf(100 * limit)} %`));
+    // cada noche nueva aparece con un pop (escalonado la primera vez); las ya vistas no se repiten
+    const seen = el._seen || (el._seen = new Set()), dots = [];
+    let fresh = 0;
     records.forEach((r, i) => {
       const f = r.review.flagged_fraction, over = r.review.whole_night_recommended;
       const signed = r.review.status === "finalized";
-      const c = S("circle", { cx: x(f), cy: 46, r: over ? 6.5 : 5.5,
+      const c = S("circle", { cx: x(f), cy: 46, r: over ? 6.5 : 5.5, "class": "sdot",
         fill: CV(signed ? "--good" : over ? "--warn" : "--s1"), "fill-opacity": signed ? .9 : .75,
-        stroke: CV("--surface-1"), "stroke-width": 2, style: "cursor:pointer" });
-      c.addEventListener("mousemove", ev => Tip.show(
+        stroke: CV("--surface-1"), "stroke-width": 2, "pointer-events": "none" });
+      // área de 24 px para apuntar (el punto pinta 11–13 px)
+      const hit = S("circle", { cx: x(f), cy: 46, r: 12, fill: "transparent", style: "cursor:pointer" });
+      hit.addEventListener("mousemove", ev => Tip.show(
         `<span class="tt">${esc(r.subject_code)} · ${esc(r.combination_name)}</span>` +
         `${esc(r.file_name)}<br>Marcadas: <b>${pct(f)}</b> (${r.review.flagged} de ${fmtInt(r.n_epochs)} épocas)<br>` +
         (signed ? "Revisión finalizada" : `${r.review.pending} pendientes`), ev));
-      c.addEventListener("mouseleave", Tip.hide);
-      if (el._onPick) c.addEventListener("click", () => { Tip.hide(); el._onPick(r.id); });
+      hit.addEventListener("mouseenter", () => dots.forEach(o => {
+        o.classList.toggle("dim", o !== c);
+        o.classList.toggle("lift", o === c);
+      }));
+      hit.addEventListener("mouseleave", () => { Tip.hide(); dots.forEach(o => o.classList.remove("dim", "lift")); });
+      if (el._onPick) hit.addEventListener("click", () => { Tip.hide(); el._onPick(r.id); });
       s.appendChild(c);
+      s.appendChild(hit);
+      dots.push(c);
+      if (!seen.has(r.id)) {
+        seen.add(r.id);
+        if (FX) FX.popIn(c, Math.min(fresh++, 14) * 45);
+      }
     });
     s.appendChild(T({ x: L, y: 96, "class": "axlbl" },
       "Porcentaje de épocas que el modelo marcó para revisión (confianza bajo el umbral) · verde: revisión finalizada · clic para abrir"));
@@ -120,9 +165,10 @@
   }
 
   /* ── Las 12 combinaciones de canales con su MF1 de test (Tabla IV del informe) ── */
-  function renderCombos(el, expected, names, selected, goal) {
+  function renderCombos(el, expected, names, selected, goal, { key = "combos" } = {}) {
     const keys = Object.keys(expected).sort((a, b) => expected[b].test_mf1 - expected[a].test_mf1);
     const W = fitW(el, 340, 640), rowH = 15, Tp = 6, L = 150, R = 50, H = Tp + keys.length * rowH + 30, pw = W - L - R;
+    const items = [], byKey = {};
     const lo = 0.70, hi = 0.80;
     const x = v => L + ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * pw;
     const s = svg(W, H);
@@ -147,15 +193,28 @@
         `<br>en validación cruzada: F1 macro ${nf(e.cv_mf1, 3)}`, ev));
       bar.addEventListener("mouseleave", Tip.hide);
       s.appendChild(bar);
+      const box = { x: L, y: y + 3, w: Math.max(2, x(e.test_mf1) - L), h: 8 };
+      items.push({ el: bar, id: k, box, base: { ...box, w: 0 }, k: i });
+      byKey[k] = bar;
       s.appendChild(T({ x: x(e.test_mf1) + 5, y: y + 10.5, "font-size": 10, fill: CV(on ? "--ink" : "--muted"),
         "font-weight": on ? 700 : 400 }, nf(e.test_mf1, 3)));
     });
     s.appendChild(T({ x: L, y: H - 2, "class": "axlbl" }, `F1 macro en el test (16 sujetos; 1 = perfecto) · línea punteada: meta ${nf(goal, 2)}`));
     el.replaceChildren(s);
+    emphasis(items.map(it => it.el));
+    if (!FX) return;
+    // las barras crecen desde el eje al aparecer; al cambiar de combinación, la elegida se enciende
+    const m = FX.memo(el, key, W);
+    animateBars(m, items, { stagger: 25, enter: 380 });
+    if (m.sel !== undefined && m.sel !== selected) {
+      if (byKey[selected]) FX.play(byKey[selected], [{ fillOpacity: 0.35 }, { fillOpacity: 1 }], { duration: 260 });
+      if (byKey[m.sel]) FX.play(byKey[m.sel], [{ fillOpacity: 1 }, { fillOpacity: 0.35 }], { duration: 260 });
+    }
+    m.sel = selected;
   }
 
   /* ── Hipnograma de la noche con marcas de revisión, confianza y referencia ── */
-  function renderHypnogram(el, d, { view, selected, viewRange, corr, onSelect }) {
+  function renderHypnogram(el, d, { view, selected, viewRange, corr, onSelect, flash }) {
     const ep = d.epochs, n = d.night.n_epochs, EP = d.night.epoch_s, T0 = d.night.start_clock_s;
     const stages = view === "predicted" ? ep.stage : ep.final;
     const hasRef = Array.isArray(ep.reference);
@@ -169,6 +228,17 @@
     s.setAttribute("aria-label", "Hipnograma de la noche");
     const x = e => L + (e / n) * pw;
     const rowY = st => mainTop + ROWS.indexOf(st) * rowH + rowH / 2;
+
+    // micro-animaciones: el hipnograma se redibuja con cada selección, así que se recuerda por
+    // noche qué mostraba (cursor, ventana del visor, vista) y cuándo empezó cada efecto
+    const now = FX ? FX.now() : 0;
+    let fx = el._fx;
+    if (!fx || fx.rid !== d.id) fx = el._fx = { rid: d.id, born: now, W };
+    if (fx.W !== W) { fx.W = W; fx.selX = null; fx.glide = null; fx.vr = null; fx.vrMove = null; }
+    // cambio de vista (final ↔ solo el modelo): de qué estadios se viene, para que los tramos corregidos salten
+    if (fx.view && fx.view !== view) fx.sw = { from: fx.stages, view, t0: now };
+    fx.view = view;
+    fx.stages = Array.from(stages);
 
     ROWS.forEach((st, i) => {
       s.appendChild(S("rect", { x: L, y: mainTop + i * rowH, width: pw, height: rowH,
@@ -187,20 +257,50 @@
     }
     // ventana visible del visor
     if (viewRange) {
-      s.appendChild(S("rect", { x: x(viewRange[0]), y: mainTop - 4, width: Math.max(2, x(viewRange[1]) - x(viewRange[0])),
-        height: mainH + 8, fill: CV("--ink"), "fill-opacity": .07, rx: 3 }));
+      const vr = { x: x(viewRange[0]), y: mainTop - 4, w: Math.max(2, x(viewRange[1]) - x(viewRange[0])), h: mainH + 8 };
+      const band = s.appendChild(S("rect", { x: vr.x, y: vr.y, width: vr.w, height: vr.h,
+        fill: CV("--ink"), "fill-opacity": .07, rx: 3 }));
+      // la franja sigue al visor: se desliza al cambiar de época y cambia de ancho con el zoom de tiempo
+      if (FX) {
+        if (fx.vr && !FX.sameBox(fx.vr, vr)) fx.vrMove = { from: fx.vr, to: vr, t0: now };
+        fx.vr = vr;
+        if (fx.vrMove && FX.sameBox(fx.vrMove.to, vr)) FX.morphBox(band, fx.vrMove.from, vr, { age: now - fx.vrMove.t0, duration: 240 });
+      }
     }
     // escalones: tramos horizontales por racha + conectores verticales
+    const stepsG = s.appendChild(S("g"));
     let run = 0;
     for (let e = 1; e <= n; e++) {
       if (e === n || stages[e] !== stages[run]) {
         const st = stages[run], y = rowY(st), hh = st === 4 ? 9 : 6;
-        s.appendChild(S("rect", { x: x(run), y: y - hh / 2, width: Math.max(1, x(e) - x(run)), height: hh,
-          rx: 1.5, fill: STG[st].c }));
-        if (e < n) s.appendChild(S("line", { x1: x(e), x2: x(e), y1: y, y2: rowY(stages[e]),
-          stroke: CV("--axis"), "stroke-width": 1 }));
+        // clases hs/s{estadio}: la leyenda resalta un estadio en toda la noche (data-focus del contenedor)
+        stepsG.appendChild(S("rect", { x: x(run), y: y - hh / 2, width: Math.max(1, x(e) - x(run)), height: hh,
+          rx: 1.5, fill: STG[st].c, "class": `hs s${st}` }));
+        if (e < n) stepsG.appendChild(S("line", { x1: x(e), x2: x(e), y1: y, y2: rowY(stages[e]),
+          stroke: CV("--axis"), "stroke-width": 1, "class": "hs-c" }));
         run = e;
       }
+    }
+    // final ↔ solo el modelo: los tramos que cambió la revisión saltan de su estadio anterior al nuevo
+    // (con borde morado de «corregida») mientras el resto aparece con un fundido corto
+    if (fx.sw && (now - fx.sw.t0 > 500 || fx.sw.view !== view)) fx.sw = null;
+    if (FX && fx.sw && fx.sw.from && fx.sw.from.length === n && FX.enabled()) {
+      const age = now - fx.sw.t0, from = fx.sw.from;
+      FX.play(stepsG, [{ opacity: 0.2 }, { opacity: 1 }], { duration: 300, age });
+      const spans = [];
+      for (let e = 0; e < n; e++) {
+        if (from[e] === stages[e]) continue;
+        const last = spans[spans.length - 1];
+        if (last && last.e1 === e && last.from === from[e] && last.to === stages[e]) last.e1 = e + 1;
+        else spans.push({ e0: e, e1: e + 1, from: from[e], to: stages[e] });
+      }
+      spans.forEach(sp => {
+        const hh = sp.to === 4 ? 9 : 6, dy = rowY(sp.from) - rowY(sp.to);
+        const g = s.appendChild(S("rect", { x: x(sp.e0), y: rowY(sp.to) - hh / 2, width: Math.max(2, x(sp.e1) - x(sp.e0)),
+          height: hh, rx: 1.5, fill: STG[sp.to].c, stroke: CV("--corr"), "stroke-width": 1.2, "pointer-events": "none" }));
+        if (!FX.play(g, [{ transform: `translateY(${dy}px)`, opacity: 1 }, { transform: "none", opacity: 1, offset: 0.75 },
+          { transform: "none", opacity: 0 }], { duration: 440, age, fill: "forwards" })) g.remove();
+      });
     }
     // marcas de revisión (y épocas cambiadas aunque no estuvieran marcadas)
     s.appendChild(T({ x: L - 8, y: flagTop + 8, "text-anchor": "end", "class": "tick" }, "revisar"));
@@ -209,7 +309,8 @@
     for (let e = 0; e < n; e++) {
       const stt = epochStatus(d, e, corr);
       if (!stt) continue;
-      s.appendChild(S("rect", { x: x(e), y: flagTop, width: tickW, height: flagH, fill: CV(STATUS[stt].v) }));
+      s.appendChild(S("rect", { x: x(e), y: flagTop, width: tickW, height: flagH, fill: CV(STATUS[stt].v),
+        "class": `fl f-${stt}` }));
     }
     // confianza
     s.appendChild(T({ x: L - 8, y: confTop + 12, "text-anchor": "end", "class": "tick" }, "confianza"));
@@ -232,19 +333,33 @@
         if (e === n || ep.reference[e] !== ep.reference[r0]) {
           const st = ep.reference[r0];
           s.appendChild(S("rect", { x: x(r0), y: refTop, width: Math.max(1, x(e) - x(r0)), height: refH,
-            fill: st >= 0 ? STG[st].c : CV("--surface-3") }));
+            fill: st >= 0 ? STG[st].c : CV("--surface-3"), "class": st >= 0 ? `hs s${st}` : "hs" }));
           r0 = e;
         }
       }
     }
+    // época recién decidida: destello verde (confirmada) o morado (corregida)
+    if (FX && flash && flash.epoch >= 0 && flash.epoch < n && FX.enabled()) {
+      const fw = Math.max(9, 3 * tickW), fr = S("rect", { x: x(flash.epoch + 0.5) - fw / 2, y: mainTop - 4, width: fw,
+        height: flagTop + flagH - mainTop + 4, rx: 2, fill: CV(flash.color), opacity: 0, "pointer-events": "none" });
+      s.appendChild(fr);
+      FX.fade(fr, flash.age);
+    }
     // época seleccionada
     if (selected != null) {
-      const xs = x(selected + 0.5);
-      s.appendChild(S("line", { x1: xs, x2: xs, y1: mainTop - 6, y2: refTop + refH + 2, stroke: CV("--ink"),
+      const xs = x(selected + 0.5), cur = S("g");
+      cur.appendChild(S("line", { x1: xs, x2: xs, y1: mainTop - 6, y2: refTop + refH + 2, stroke: CV("--ink"),
         "stroke-width": 1.6 }));
-      s.appendChild(S("path", { d: `M${xs - 5} ${mainTop - 8}L${xs + 5} ${mainTop - 8}L${xs} ${mainTop - 2}Z`,
+      cur.appendChild(S("path", { d: `M${xs - 5} ${mainTop - 8}L${xs + 5} ${mainTop - 8}L${xs} ${mainTop - 2}Z`,
         fill: CV("--ink") }));
+      s.appendChild(cur);
+      if (FX) {
+        if (fx.selX != null && Math.abs(fx.selX - xs) > 0.5) fx.glide = { dx: fx.selX - xs, to: xs, t0: now };
+        fx.selX = xs;
+        if (fx.glide && fx.glide.to === xs) FX.glide(cur, fx.glide.dx, now - fx.glide.t0);
+      }
     }
+    if (FX) FX.reveal(s, now - fx.born);
     // interacción
     const xh = S("line", { y1: mainTop, y2: refTop + refH, stroke: CV("--ink2"), "stroke-dasharray": "3 3",
       opacity: 0, "class": "xhair" });
@@ -268,12 +383,13 @@
   }
 
   /* ── Tiempo por estadio: modelo, final y referencia ── */
-  function renderStageBars(el, rows) {
+  function renderStageBars(el, rows, { key = "stages" } = {}) {
     const W = fitW(el, 360, 1080), L = 92, R = 12, rowH = 30, gap = 12, Tp = 4, pw = W - L - R;
     const H = Tp + rows.length * (rowH + gap) + 26;
     const s = svg(W, H);
     s.setAttribute("aria-label", "Minutos en cada estadio");
     const total = Math.max(...rows.map(r => STG.reduce((a, st) => a + (r.stages[st.k] ? r.stages[st.k].min : 0), 0)), 1);
+    const items = [], labels = [];
     rows.forEach((r, i) => {
       const y = Tp + i * (rowH + gap);
       s.appendChild(T({ x: L - 10, y: y + rowH / 2 + 4, "text-anchor": "end", "font-size": 12, "font-weight": 600,
@@ -287,18 +403,29 @@
           `<b>${nf(m, 1)} min</b> · ${nf(r.stages[st.k].pct, 1)} % ${k === 0 ? "del tiempo en cama" : "del sueño total"}`, ev));
         rect.addEventListener("mouseleave", Tip.hide);
         s.appendChild(rect);
-        if (w > 58) s.appendChild(T({ x: cx + w / 2, y: y + rowH / 2 + 4, "text-anchor": "middle", "font-size": 11,
-          "font-weight": 700, fill: k === 0 ? "#0b2340" : "#fff" }, `${st.k} ${Math.round(m)}′`));
+        const id = `${i}|${st.k}`, box = { x: cx, y, w: Math.max(w - 1.5, .5), h: rowH };
+        items.push({ el: rect, id, box, base: { ...box, w: 0 }, k });
+        if (w > 58) labels.push([s.appendChild(T({ x: cx + w / 2, y: y + rowH / 2 + 4, "text-anchor": "middle", "font-size": 11,
+          "font-weight": 700, fill: k === 0 ? "#0b2340" : "#fff", "pointer-events": "none" }, `${st.k} ${Math.round(m)}′`)), id]);
         cx += w;
       });
     });
     s.appendChild(T({ x: L, y: H - 6, "class": "axlbl" },
       "Minutos por estadio (′ = minutos) · las barras miden lo mismo: la ventana analizada"));
     el.replaceChildren(s);
+    emphasis(items.map(it => it.el));
+    if (!FX) return;
+    // los segmentos se construyen de izquierda a derecha; con una decisión, pasan del ancho anterior al nuevo
+    const m = FX.memo(el, key, W);
+    const ch = animateBars(m, items, { stagger: 70, enter: 300 });
+    labels.forEach(([t, id]) => {
+      if (!ch.from) FX.play(t, [{ opacity: 0 }, { opacity: 1 }], { age: m.age, delay: 330, duration: 200, fill: "backwards" });
+      else if (!ch.from[id] || ch.from[id].w !== m.cur[id].w) FX.play(t, [{ opacity: 0 }, { opacity: 1 }], { age: ch.age, duration: 260 });
+    });
   }
 
   /* ── Matriz de confusión (tabla HTML con intensidad por fila) ── */
-  function renderConfusion(el, cm, colLabel) {
+  function renderConfusion(el, cm, colLabel, { key = "cm" } = {}) {
     const rows = cm.map(r => r.reduce((a, b) => a + b, 0));
     const head = `<tr><th></th>${STG.map(s => `<th>${s.k}</th>`).join("")}<th>n</th></tr>`;
     const body = cm.map((r, i) => `<tr><th style="text-align:right">${STG[i].k}</th>` + r.map((v, j) => {
@@ -311,11 +438,27 @@
         `${v ? Math.round(100 * f) + "%" : "·"}</td>`;
     }).join("") + `<th>${rows[i]}</th></tr>`).join("");
     el.innerHTML = `<table class="cm">${head}${body}</table>`;
+    if (!FX || !FX.enabled()) return;
+    // entrada: las celdas aparecen en diagonal; cambio (modelo ↔ final, una decisión): del color anterior al nuevo
+    const m = FX.memo(el, key, 0), t = FX.now();
+    const tds = [...el.querySelectorAll("td")], cols = tds.map(td => getComputedStyle(td).backgroundColor);
+    if (m.cols && m.cols.some((c, k) => c !== cols[k])) { m.fromCols = m.cols; m.changedAt = t; }
+    m.cols = cols;
+    tds.forEach((td, k) => {
+      const i = Math.floor(k / 5), j = k % 5;
+      if (!m.changedAt) {
+        FX.play(td, [{ opacity: 0, transform: "scale(.8)" }, { opacity: 1, transform: "none" }],
+          { duration: 220, delay: (i + j) * 30, age: m.age, fill: "backwards" });
+      } else if (m.fromCols[k] !== cols[k]) {
+        FX.play(td, [{ backgroundColor: m.fromCols[k] }, { backgroundColor: cols[k] }], { duration: 300, age: t - m.changedAt });
+      }
+    });
   }
 
   /* ── F1 por estadio: modelo frente a final ── */
-  function renderF1(el, a, b) {
+  function renderF1(el, a, b, { key = "f1" } = {}) {
     const W = fitW(el, 300, 520), H = 180, L = 34, R = 10, Tp = 10, B = 34, pw = W - L - R, ph = H - Tp - B;
+    const items = [];
     const s = svg(W, H);
     s.setAttribute("aria-label", "F1 por estadio");
     const y = v => Tp + ph - v * ph;
@@ -335,40 +478,54 @@
         r.addEventListener("mousemove", ev => Tip.show(`<span class="tt">${st.k} · ${j ? "final" : "modelo"}</span>F1 <b>${nf(v, 3)}</b>`, ev));
         r.addEventListener("mouseleave", Tip.hide);
         s.appendChild(r);
+        const box = { x: bx, y: y(v), w: bw, h: Math.max(0, y(0) - y(v)) };
+        items.push({ el: r, id: `${st.k}|${j}`, box, base: { ...box, y: y(0), h: 0 }, k: i });
       });
       s.appendChild(T({ x: gx, y: H - B + 16, "text-anchor": "middle", "font-size": 11.5, "font-weight": 650,
         fill: CV("--ink2") }, st.k));
     });
     s.appendChild(T({ x: L, y: H - 4, "class": "axlbl" }, b ? "barra clara: modelo · barra llena: final con revisión" : "F1 del modelo por estadio"));
     el.replaceChildren(s);
+    emphasis(items.map(it => it.el));
+    // las barras suben desde el eje; con la revisión, la barra «final» crece o cambia desde la anterior
+    if (FX) animateBars(FX.memo(el, key, W), items, { stagger: 45, enter: 320 });
   }
 
   /* ── Composición del registro ── */
-  function renderQuality(el, segs) {
+  function renderQuality(el, segs, { key = "quality" } = {}) {
     const kindCol = { outside: "--surface-3", window: "--s1" };
     const W = fitW(el, 360, 1080), H = 86, L = 10, R = 10, pw = W - L - R;
     const s = svg(W, H);
     s.setAttribute("aria-label", "Composición del registro");
     const tot = segs.reduce((a, v) => a + v.hours, 0) || 1;
+    const items = [], labels = [];
     let cx = L;
-    segs.forEach(seg => {
+    segs.forEach((seg, k) => {
       const w = (seg.hours / tot) * pw, inv = seg.kind === "window";
       const rect = S("rect", { x: cx, y: 22, width: Math.max(w - 2, 1), height: 30, rx: 5, fill: CV(kindCol[seg.kind]) });
       rect.addEventListener("mousemove", ev => Tip.show(`<span class="tt">${seg.label}</span>` +
         `<b>${fmtHM(seg.hours * 3600)}</b> · ${nf(100 * seg.hours / tot, 1)} % del archivo`, ev));
       rect.addEventListener("mouseleave", Tip.hide);
       s.appendChild(rect);
+      const box = { x: cx, y: 22, w: Math.max(w - 2, 1), h: 30 };
+      items.push({ el: rect, id: String(k), box, base: { ...box, w: 0 }, k });
       if (w > 120) {
-        s.appendChild(T({ x: cx + w / 2, y: 35, "text-anchor": "middle", "font-size": 11.5, "font-weight": 600,
-          fill: inv ? "#fff" : CV("--ink2") }, seg.label));
-        s.appendChild(T({ x: cx + w / 2, y: 48, "text-anchor": "middle", "font-size": 11,
-          fill: inv ? "#fff" : CV("--muted") }, nf(seg.hours) + " h"));
+        labels.push(s.appendChild(T({ x: cx + w / 2, y: 35, "text-anchor": "middle", "font-size": 11.5, "font-weight": 600,
+          fill: inv ? "#fff" : CV("--ink2"), "pointer-events": "none" }, seg.label)));
+        labels.push(s.appendChild(T({ x: cx + w / 2, y: 48, "text-anchor": "middle", "font-size": 11,
+          fill: inv ? "#fff" : CV("--muted"), "pointer-events": "none" }, nf(seg.hours) + " h")));
       }
       cx += w;
     });
     s.appendChild(T({ x: L, y: 12, "class": "axlbl" }, `Cómo se reparten las ${fmtHM(tot * 3600)} del archivo`));
     s.appendChild(T({ x: L, y: 74, "class": "axlbl" }, "Solo la ventana analizada se envía al modelo"));
     el.replaceChildren(s);
+    emphasis(items.map(it => it.el));
+    if (!FX) return;
+    // los tramos del archivo se construyen de izquierda a derecha y luego aparecen sus etiquetas
+    const m = FX.memo(el, key, W);
+    animateBars(m, items, { stagger: 90, enter: 300 });
+    labels.forEach(t => FX.play(t, [{ opacity: 0 }, { opacity: 1 }], { age: m.age, delay: 300 + 90 * segs.length, duration: 200, fill: "backwards" }));
   }
 
   /* ── Visor de señal multicanal ──
@@ -423,21 +580,34 @@
       const e0 = Math.floor(t0 / EP), e1 = Math.ceil(t1 / EP);
       const final = d.epochs.final;
 
+      // lo que depende del tiempo (fondo, trazos, pista) va en un grupo que se desliza al cambiar
+      // de época, recortado al área del gráfico para no invadir las etiquetas de los canales
+      const clipId = `sigclip${my}`;
+      const clip = S("clipPath", { id: clipId });
+      clip.appendChild(S("rect", { x: L, y: 0, width: pw, height: H }));
+      s.appendChild(S("defs")).appendChild(clip);
+      const slide = S("g");
+      s.appendChild(S("g", { "clip-path": `url(#${clipId})` })).appendChild(slide);
+      // partes que se animan por separado: fondo, una fila por canal (trazo y etiquetas) y la pista
+      const bgG = slide.appendChild(S("g")), traces = [], rows = {};
+
       // fondo: estadio final por época; atenuadas las que no son la seleccionada
       for (let e = e0; e < e1; e++) {
         if (e < 0 || e >= n) continue;
         const a = Math.max(e * EP, t0), b = Math.min((e + 1) * EP, t1);
-        s.appendChild(S("rect", { x: x(a), y: Tp, width: Math.max(x(b) - x(a), .6), height: rowsH,
+        bgG.appendChild(S("rect", { x: x(a), y: Tp, width: Math.max(x(b) - x(a), .6), height: rowsH,
           fill: STG[final[e]].c, "fill-opacity": .14 }));
-        if (e !== this.epoch && this.win <= 300) s.appendChild(S("rect", { x: x(a), y: Tp, width: Math.max(x(b) - x(a), .6),
+        if (e !== this.epoch && this.win <= 300) bgG.appendChild(S("rect", { x: x(a), y: Tp, width: Math.max(x(b) - x(a), .6),
           height: rowsH, fill: CV("--surface-1"), "fill-opacity": .45 }));
-        if (e > e0 && this.win <= 300) s.appendChild(S("line", { x1: x(e * EP), x2: x(e * EP), y1: Tp, y2: Tp + rowsH,
-          stroke: CV("--axis"), "stroke-dasharray": "3 3" }));
+        if (e > e0 && this.win <= 300) bgG.appendChild(S("line", { x1: x(e * EP), x2: x(e * EP), y1: Tp, y2: Tp + rowsH,
+          stroke: CV("--axis"), "stroke-dasharray": "3 3", "vector-effect": "non-scaling-stroke" }));
       }
+      let box = null, boxBox = null;
       if (this.epoch >= e0 && this.epoch < e1) {
         const a = Math.max(this.epoch * EP, t0), b = Math.min((this.epoch + 1) * EP, t1);
-        s.appendChild(S("rect", { x: x(a) + 1, y: Tp + 1, width: Math.max(x(b) - x(a) - 2, 1), height: rowsH - 2,
-          fill: "none", stroke: CV("--s1"), "stroke-width": 2, rx: 3 }));
+        boxBox = { x: x(a) + 1, y: Tp + 1, w: Math.max(x(b) - x(a) - 2, 1), h: rowsH - 2 };
+        box = s.appendChild(S("rect", { x: boxBox.x, y: boxBox.y, width: boxBox.w, height: boxBox.h,
+          fill: "none", stroke: CV("--s1"), "stroke-width": 2, rx: 3, "vector-effect": "non-scaling-stroke" }));
       }
 
       // trazos
@@ -449,10 +619,12 @@
         let amp = SCALE[info.kind];
         if (!amp && tr) amp = Math.max(1, ...tr.max.map(Math.abs), ...tr.min.map(Math.abs)) * 1.1;
         amp = (amp || 100) / this.gain;
-        s.appendChild(S("line", { x1: L, x2: W - R, y1: mid, y2: mid, stroke: CV("--grid") }));
-        s.appendChild(T({ x: L - 8, y: mid - 2, "text-anchor": "end", "font-size": 12, "font-weight": 650,
+        const rowG = slide.appendChild(S("g")), labG = s.appendChild(S("g"));
+        rows[slot] = { mid, h, rowG, labG };
+        rowG.appendChild(S("line", { x1: L, x2: W - R, y1: mid, y2: mid, stroke: CV("--grid") }));
+        labG.appendChild(T({ x: L - 8, y: mid - 2, "text-anchor": "end", "font-size": 12, "font-weight": 650,
           fill: CV(used ? "--ink" : "--muted") }, info.name));
-        s.appendChild(T({ x: L - 8, y: mid + 11, "text-anchor": "end", "font-size": 10.5, fill: CV("--muted") },
+        labG.appendChild(T({ x: L - 8, y: mid + 11, "text-anchor": "end", "font-size": 10.5, fill: CV("--muted") },
           `±${Math.round(amp)} µV${used ? "" : " · no usado"}`));
         if (tr) {
           const k = tr.min.length, yv = v => mid - (Math.max(-amp, Math.min(amp, v)) / amp) * (h / 2 - 2);
@@ -460,23 +632,25 @@
           for (let i = 0; i < k; i++) p += `${(L + (i / k) * pw).toFixed(1)} ${yv(tr.max[i]).toFixed(1)}${i < k - 1 ? "L" : ""}`;
           for (let i = k - 1; i >= 0; i--) p += `L${(L + (i / k) * pw).toFixed(1)} ${yv(tr.min[i]).toFixed(1)}`;
           // el trazo también lleva borde: una envolvente plana (EMG de 1 Hz) se ve como línea
-          s.appendChild(S("path", { d: p + "Z", fill: CV(used ? "--ink2" : "--muted"), "fill-opacity": used ? .78 : .5,
-            stroke: CV(used ? "--ink2" : "--muted"), "stroke-width": .9, "stroke-linejoin": "round" }));
+          // (non-scaling-stroke: el borde no engorda mientras el zoom de tiempo estira el trazo)
+          traces.push({ mid, el: rowG.appendChild(S("path", { d: p + "Z", fill: CV(used ? "--ink2" : "--muted"), "fill-opacity": used ? .78 : .5,
+            stroke: CV(used ? "--ink2" : "--muted"), "stroke-width": .9, "stroke-linejoin": "round",
+            "vector-effect": "non-scaling-stroke" })) });
         }
         y0 += h + 6;
       });
 
       // pista de estadios (el color nunca va solo: lleva la etiqueta)
-      const ty = Tp + rowsH + 4;
+      const ty = Tp + rowsH + 4, trackG = slide.appendChild(S("g"));
       for (let e = e0; e < e1; e++) {
         if (e < 0 || e >= n) continue;
         const a = Math.max(e * EP, t0), b = Math.min((e + 1) * EP, t1), w = x(b) - x(a);
-        s.appendChild(S("rect", { x: x(a) + .5, y: ty, width: Math.max(w - 1, .5), height: TRK - 4, rx: 3,
+        trackG.appendChild(S("rect", { x: x(a) + .5, y: ty, width: Math.max(w - 1, .5), height: TRK - 4, rx: 3,
           fill: STG[final[e]].c }));
-        if (w > 26) s.appendChild(T({ x: x(a) + w / 2, y: ty + 12, "text-anchor": "middle", "font-size": 10.5,
+        if (w > 26) trackG.appendChild(T({ x: x(a) + w / 2, y: ty + 12, "text-anchor": "middle", "font-size": 10.5,
           "font-weight": 700, fill: "#fff" }, STG[final[e]].k));
         const stt = epochStatus(d, e, this.corr);
-        if (stt && w > 6) s.appendChild(S("circle", { cx: x(b) - 5, cy: ty - 1, r: 3.5, fill: CV(STATUS[stt].v),
+        if (stt && w > 6) trackG.appendChild(S("circle", { cx: x(b) - 5, cy: ty - 1, r: 3.5, fill: CV(STATUS[stt].v),
           stroke: CV("--surface-1"), "stroke-width": 1 }));
       }
 
@@ -506,7 +680,68 @@
         if (e !== this.epoch && this.onSelect) this.onSelect(e);
       });
       s.appendChild(capt);
+      const oldH = this.el.offsetHeight;
       this.el.replaceChildren(s);
+
+      // movimiento respecto de lo que se veía antes (misma noche y mismo ancho):
+      //  - zoom de tiempo (30 s ↔ 30 min): la señal se estira o comprime desde la escala anterior
+      //  - canales: las filas que quedan se reacomodan, la nueva entra y el visor cambia de alto
+      //  - otra época cerca: el contenido llega desde donde estaba (se desliza)
+      //  - salto lejano: la señal entra desde el lado del salto
+      //  - misma ventana con otra amplitud: las ondas se estiran desde la escala anterior
+      //  - el recuadro de la época elegida pasa de su caja anterior a la nueva
+      const prev = this._prev, chKey = chans.join(",");
+      if (FX && FX.enabled() && prev && prev.id === d.id && prev.W === W) {
+        const dur280 = { duration: 280 };
+        if (prev.dur !== dur) {
+          const k = dur / prev.dur, dx = ((t0 - prev.t0) / prev.dur) * pw;
+          slide.style.transformOrigin = `${L}px 0`;
+          FX.play(slide, [{ transform: `translate(${dx}px, 0) scaleX(${k})` }, { transform: "none" }], { duration: 340 });
+        } else if (prev.ch !== chKey) {
+          const pr = prev.rows || {};
+          chans.forEach(slot => {
+            const r = rows[slot], o = pr[slot];
+            if (o) {
+              const dy = o.mid - r.mid;
+              r.rowG.style.transformOrigin = `0 ${r.mid}px`;
+              FX.play(r.rowG, [{ transform: `translateY(${dy}px) scaleY(${o.h / r.h})` }, { transform: "none" }], dur280);
+              FX.play(r.labG, [{ transform: `translateY(${dy}px)` }, { transform: "none" }], dur280);
+            } else {
+              [r.rowG, r.labG].forEach(g => FX.play(g, [{ opacity: 0, transform: "translateY(-10px)" }, { opacity: 1, transform: "none" }],
+                { duration: 280, delay: 60, fill: "backwards" }));
+            }
+          });
+          if (prev.rowsH && rowsH) {
+            bgG.style.transformOrigin = `0 ${Tp}px`;
+            FX.play(bgG, [{ transform: `scaleY(${prev.rowsH / rowsH})` }, { transform: "none" }], dur280);
+          }
+          FX.play(trackG, [{ transform: `translateY(${prev.ty - ty}px)` }, { transform: "none" }], dur280);
+          // el visor crece o se encoge en vez de saltar de alto
+          const newH = this.el.offsetHeight;
+          if (Math.abs(newH - oldH) > 2) {
+            this.el.style.overflow = "hidden";
+            const a = FX.play(this.el, [{ height: oldH + "px" }, { height: newH + "px" }], dur280);
+            if (a) a.onfinish = a.oncancel = () => { this.el.style.overflow = ""; }; else this.el.style.overflow = "";
+          }
+        } else {
+          const dx = ((t0 - prev.t0) / dur) * pw;
+          if (Math.abs(dx) > 0.5 && Math.abs(dx) < pw * 0.9) {
+            FX.play(slide, [{ transform: `translateX(${dx}px)` }, { transform: "none" }], { duration: 230 });
+          } else if (Math.abs(dx) >= pw * 0.9) {
+            const dir = t0 > prev.t0 ? 1 : -1;            // hacia adelante entra por la derecha
+            FX.play(slide, [{ transform: `translateX(${dir * 70}px)`, opacity: 0 }, { transform: "none", opacity: 1 }], { duration: 260 });
+          } else if (prev.gain !== this.gain) {
+            traces.forEach(tr => {
+              tr.el.style.transformOrigin = `0 ${tr.mid}px`;
+              FX.play(tr.el, [{ transform: `scaleY(${prev.gain / this.gain})` }, { transform: "none" }], { duration: 240 });
+            });
+          }
+        }
+        if (box && prev.box) FX.morphBox(box, prev.box, boxBox, { duration: 260 });
+      }
+      const rowsMemo = {};
+      chans.forEach(slot => { rowsMemo[slot] = { mid: rows[slot].mid, h: rows[slot].h }; });
+      this._prev = { id: d.id, W, dur, t0, gain: this.gain, ch: chKey, box: boxBox, rows: rowsMemo, rowsH, ty };
       const now = document.getElementById("sigNow");
       if (now) now.textContent = T0 != null ? `${fmt(T0 + t0)} – ${fmt(T0 + t1)}` : "";
     }

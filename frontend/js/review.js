@@ -36,10 +36,31 @@
     evShow: new Set(),           // épocas no marcadas con la evidencia abierta
     evChannel: null,
     watch: null,                 // análisis que sigue el diálogo de avance
+    flash: null,                 // última decisión {epoch, kind: ok|corr, t0}: su destello
+    morph: {},                   // barras del inspector: de qué valores vienen y desde cuándo
+    arch: null,                  // cifras de arquitectura: de qué valores vienen y desde cuándo
+    hist: null,                  // bitácora: qué entrada la encabezaba (para resaltar las nuevas)
+    freshNote: false,            // la nota recién guardada se resalta al dibujarse
     go: () => {},
     onChange: () => {}
   };
   const V = C.SignalViewer;
+
+  /* ── micro-animaciones (js/fx.js) ──
+     Las vistas se redibujan varias veces por decisión (local → avance → API): cada
+     efecto guarda cuándo empezó y el elemento nuevo lo retoma con esa edad. */
+  const FX = window.MaiaFX;
+  const FLASH = { ok: "--good", corr: "--corr" };
+  const flashAge = () => (R.flash ? FX.now() - R.flash.t0 : Infinity);
+
+  /* barras (probabilidades, bandas): pasan de los valores que mostraban a los nuevos */
+  function morph(kind, els, key) {
+    const t = FX.now(), m = R.morph[kind], vals = els.map(e => parseFloat(e.style.width) || 0);
+    const same = m && m.key === key && m.vals.length === vals.length && m.vals.every((v, k) => Math.abs(v - vals[k]) <= 0.3);
+    if (!same) R.morph[kind] = { key, vals, from: m ? m.vals : null, t0: t };
+    const cur = R.morph[kind];
+    FX.widths(els, cur.from && cur.from.length === vals.length ? cur.from : null, t - cur.t0);
+  }
 
   const locked = () => R.d && R.d.review && (R.d.review.status === "finalized" || R.d.review.status === "signed_off");
   const isActive = () => !$("vRes").classList.contains("hidden") && !!R.d && R.tab === "clin";
@@ -125,18 +146,25 @@
   }
 
   /* ══════════════ abrir un registro ══════════════ */
-  async function open(id) {
+  /* opts.shared: elemento de origen (la fila de Registros) que se transforma en el encabezado;
+     opts.label: el nombre de la noche, para mostrarlo ya en vez del esqueleto de carga */
+  async function open(id, opts = {}) {
     stopPolling();
     R.id = id;
     R.d = null;
-    R.go("vRes");
+    // con transición entre vistas el cambio de vista llega un cuadro después: se espera antes de
+    // dibujar, porque las gráficas toman el ancho de su contenedor visible
+    const shown = R.go("vRes", { shared: opts.shared });
     $("resBody").classList.add("hidden");
     $("procPanel").classList.add("hidden");
     $("failBox").classList.add("hidden");
-    $("resFileName").innerHTML = '<span class="skel" style="width:220px">&nbsp;</span>';
+    if (opts.label) $("resFileName").textContent = opts.label;
+    else $("resFileName").innerHTML = '<span class="skel" style="width:220px">&nbsp;</span>';
     $("resFileMeta").textContent = "";
     try {
-      route(await MaiaAPI.getRecord(id));
+      const r = await MaiaAPI.getRecord(id);
+      await shown;
+      route(r);
     } catch (e) {
       UI.toast(e.message || "No se pudo abrir el registro.", true);
       R.go("vList");
@@ -200,6 +228,10 @@
       R.ev.clear();
       R.evShow.clear();
       R.evChannel = null;
+      R.flash = null;
+      R.morph = {};
+      R.arch = null;
+      $("c-hypno")._fx = null;                      // el hipnograma se vuelve a dibujar de izquierda a derecha
       R.sel = nextPending(-1, 1) ?? d.epochs.review.indexOf(1);
       if (R.sel < 0) R.sel = 0;
       V.init($("c-signal"), d, {
@@ -296,26 +328,31 @@
     $("rCovN").textContent = `${fmtInt(n - rv.flagged)} épocas con confianza ≥ ${nf(d.model.threshold, 2)}`;
     $("rFlag").innerHTML = `${fmtInt(rv.flagged)} <small>(${pct(rv.flagged / n, 0)})</small>`;
     $("rFlagN").textContent = rv.flagged ? `${rv.pending} pendientes · ${rv.resolved} resueltas` : "ninguna época dudosa";
+    FX.tick($("rFlagN"), $("rFlagN").textContent, d.id);
     const st = statusNow();
     $("rStatus").textContent = UI.STATUS_TXT[st];
     $("rStatus").style.color = `var(${{ finalized: "--ok-text", full_review_suggested: "--crit", in_review: "--s1", to_review: "--warn-text" }[st]})`;
     $("rStatusN").textContent = locked()
       ? `por ${d.review.finalized_by || d.review.signed_off_by}`
       : `${rv.confirmed} confirmada${rv.confirmed === 1 ? "" : "s"} · ${rv.corrected} corregida${rv.corrected === 1 ? "" : "s"}`;
+    FX.tick($("rStatusN"), $("rStatusN").textContent, d.id);
   }
 
   /* ── hipnograma ── */
   function renderHypno() {
     const d = R.d;
-    const st = STG.map(s => `<span><i style="background:${s.c}"></i>${s.k}</span>`).join("");
-    const rv = Object.entries(C.STATUS).map(([, v]) =>
-      `<span><i style="background:var(${v.v})"></i>${v.label}</span>`).join("");
+    // data-hl: al pasar el mouse por un estadio (o un estado de revisión) se resalta en toda la noche
+    const st = STG.map((s, k) => `<span data-hl="s${k}"><i style="background:${s.c}"></i>${s.k}</span>`).join("");
+    const rv = Object.entries(C.STATUS).map(([key, v]) =>
+      `<span data-hl="f-${key}"><i style="background:var(${v.v})"></i>${v.label}</span>`).join("");
     $("hypLegend").innerHTML = st + '<span style="color:var(--muted)">·</span>' + rv +
       `<span style="color:var(--muted)">· confianza${UI.info("confidence")} con el umbral${UI.info("threshold")}</span>` +
       (d.epochs.reference ? `<span style="color:var(--muted)">· abajo: experto${UI.info("reference")}</span>` : "");
+    const age = flashAge();
     C.renderHypnogram($("c-hypno"), d, {
       view: R.view, selected: R.sel, corr: R.corr, onSelect: select,
-      viewRange: V.d ? V.range().map(t => t / d.night.epoch_s) : null
+      viewRange: V.d ? V.range().map(t => t / d.night.epoch_s) : null,
+      flash: age < 520 ? { epoch: R.flash.epoch, color: FLASH[R.flash.kind], age } : null
     });
   }
 
@@ -335,6 +372,7 @@
     const g = V.gain, kinds = [...new Set(V.channels.map(s => (R.cfg.channels[s] || {}).kind))];
     const parts = kinds.filter(k => C.SCALE[k]).map(k => `${k.toUpperCase()} ±${Math.round(C.SCALE[k] / g)} µV`);
     $("gainOut").textContent = `×${nf(g, g < 1 ? 2 : 1)}${parts.length ? " · " + parts.join(", ") : ""}`;
+    FX.tick($("gainOut"), $("gainOut").textContent, R.d.id);
     $("gainUp").disabled = g >= 8 - 1e-9;
     $("gainDown").disabled = g <= 0.25 + 1e-9;
   }
@@ -359,6 +397,7 @@
         ? `<b>${rv.resolved}</b> de ${rv.flagged} épocas marcadas resueltas · ${rv.corrected} cambio${rv.corrected === 1 ? "" : "s"}`
         : `El modelo no marcó épocas · ${rv.corrected} cambio${rv.corrected === 1 ? "" : "s"}`;
     }
+    FX.tick($("revText"), $("revText").innerHTML, d.id);
     $("btnSign").textContent = locked() ? "Reabrir revisión" : "Finalizar revisión";
     $("btnSign").classList.toggle("ghost", locked());
     $("btnSign").classList.toggle("cta", !locked());
@@ -445,6 +484,20 @@
     $("iPrevF").onclick = () => jumpPending(-1);
     $("iNextF").onclick = () => jumpPending(1);
     $("iAuto").onchange = e => { R.autoAdvance = e.target.checked; };
+    // las probabilidades pasan de las de la época anterior a las de esta
+    morph("p", [...$("insp").querySelectorAll(".pbar .fi")], i);
+    // decisión recién tomada: anillo verde (confirmada) o morado (corregida) donde se ve esa época
+    const age = flashAge();
+    if (age < 250) {
+      const c = FLASH[R.flash.kind], e = R.flash.epoch, box = $("insp");
+      if (e === i) {
+        box.querySelectorAll('button[aria-pressed="true"]').forEach(b => FX.ring(b, c, age));
+        const cur = box.querySelector(".ctx .cur");
+        FX.ring(cur, c, age, getComputedStyle(cur).boxShadow);
+      } else if (Math.abs(e - i) === 1) {             // pasó a la época vecina: el anillo va en «Anterior»/«Siguiente»
+        FX.ring(box.querySelector(e < i ? ".ctx > :first-child" : ".ctx > :last-child"), c, age);
+      }
+    }
     renderEvidence();
   }
 
@@ -495,6 +548,7 @@
         ? `<span><i class="c${k + 1}" style="width:4px"></i>${cands[k]} típica, ${k + 1}.ª opción (${t.n} épocas)</span>` : "").join("")}</div>
       <div class="evhint">${hint}</div>
       <div class="mini" style="margin-top:6px">Cada fila tiene su propia escala. ${esc(ev.method)}</div></div>`;
+    morph("band", [...el.querySelectorAll(".band .bt .fi")], `${i}|${ev.channel}`);
     if ($("iEvCh")) $("iEvCh").onchange = e => { R.evChannel = e.target.value; renderEvidence(); };
   }
 
@@ -509,6 +563,7 @@
       if (keep) rows.push(i);
     }
     $("qCount").textContent = `${fmtInt(rows.length)} época${rows.length === 1 ? "" : "s"}`;
+    FX.tick($("qCount"), $("qCount").textContent, d.id);
     const lbl = { pending: '<span class="pill w">Pendiente</span>', confirmed: '<span class="pill ok">Confirmada</span>' };
     $("qBody").innerHTML = rows.length ? rows.map(i => {
       const st = C.epochStatus(d, i, R.corr), t = clockOf(i);
@@ -544,16 +599,33 @@
     ["awakenings", "Despertares de 1 min o más", x => [String(x.awakenings), ""]]
   ];
 
+  /* campo numérico y decimales de cada cifra (para que cuente al cambiar) */
+  const ARCH_NUM = { tib: ["tib_min", 0], tst: ["tst_min", 0], efficiency: ["efficiency_pct", 1], sol: ["sol_min", 1],
+    rem_latency: ["rem_latency_min", 1], waso: ["waso_min", 1], awakenings: ["awakenings", 0] };
+
   function renderArchitecture() {
     const m = R.d.metrics, f = m.final || m.predicted;
     const hrs = v => v == null ? "" : `≈ ${fmtHM(v * 60)}`;
     $("archGrid").innerHTML = ARCH.map(([key, label, fn]) => {
       const [v, u] = fn(f);
       const sub = key === "tib" ? hrs(f.tib_min) : key === "tst" ? hrs(f.tst_min) : "";
-      return `<div class="arch"><div class="k">${label}${UI.info(key)}</div><div class="v">${v}${u ? `<small>${u}</small>` : ""}</div>
+      return `<div class="arch"><div class="k">${label}${UI.info(key)}</div><div class="v"><span class="num" data-k="${key}">${v}</span>${u ? `<small>${u}</small>` : ""}</div>
         ${sub ? `<div class="n">${sub}</div>` : ""}</div>`;
     }).join("");
-    C.renderStageBars($("c-stages"), [{ label: "Final", stages: f.stages }]);
+    // las cifras cuentan: desde 0 al abrir la noche; desde el valor anterior cuando una decisión las cambia
+    const t = FX.now(), vals = {}, a = R.arch, same = a && a.rid === R.d.id;
+    for (const k in ARCH_NUM) vals[k] = f[ARCH_NUM[k][0]];
+    if (!same || Object.keys(vals).some(k => vals[k] !== a.vals[k])) {
+      R.arch = { rid: R.d.id, vals, from: same ? a.vals : null, t0: t, dur: same ? 250 : 450 };
+    }
+    const cur = R.arch;
+    $("archGrid").querySelectorAll(".num").forEach(el => {
+      const k = el.dataset.k, to = vals[k];
+      if (to == null) return;
+      const from = cur.from ? cur.from[k] : 0;
+      FX.countTo(el, from == null ? to : from, to, v => nf(v, ARCH_NUM[k][1]), cur.dur, t - cur.t0);
+    });
+    C.renderStageBars($("c-stages"), [{ label: "Final", stages: f.stages }], { key: R.d.id });
     $("stageTable").innerHTML = `<thead><tr><th class="l">Estadio</th><th>Minutos</th><th>Porcentaje${UI.info("stage_pct")}</th></tr></thead><tbody>` +
       ["N1", "N2", "N3", "REM", "W"].map(s => `<tr><td class="l"><span class="st" style="background:${STG.find(x => x.k === s).c}">${s}</span></td>
         <td>${nf(f.stages[s].min, 1)}</td><td>${nf(f.stages[s].pct, 1)} % <span class="mini" style="margin:0">${s === "W"
@@ -566,9 +638,11 @@
   /* ── notas del técnico (US-15) ── */
   function renderNotes() {
     const notes = R.d.notes || [];
-    $("noteList").innerHTML = notes.length ? notes.map(n => {
+    const fresh = R.freshNote;                       // la nota recién guardada (la primera: van de nueva a vieja)
+    R.freshNote = false;
+    $("noteList").innerHTML = notes.length ? notes.map((n, k) => {
       const at = UI.parse(n.at);
-      return `<div class="note"><div class="who"><b>${esc(n.author)}</b> · ${UI.dShort(at)}, ${UI.dTime(at)}</div>
+      return `<div class="note${fresh && k === 0 ? " fresh" : ""}"><div class="who"><b>${esc(n.author)}</b> · ${UI.dShort(at)}, ${UI.dTime(at)}</div>
         <div class="tx">${esc(n.text)}</div></div>`;
     }).join("") : '<div class="mini" style="margin:0">Todavía no hay notas para esta noche.</div>';
     noteCount();
@@ -589,6 +663,7 @@
       R.d.notes = out.notes;
       R.d.history = out.history;
       $("noteText").value = "";
+      R.freshNote = true;
       renderNotes();
       renderHistory();
       UI.toast("Nota guardada.");
@@ -601,7 +676,7 @@
   /* ── detalles del análisis y bitácora (US-04, US-03) ── */
   function renderDetails() {
     const d = R.d, q = d.quality, f = q.file, nt = d.night, mo = d.model, si = d.source_info || {};
-    C.renderQuality($("c-quality"), q.composition);
+    C.renderQuality($("c-quality"), q.composition, { key: d.id });
     const start = f.start ? new Date(f.start) : null;
     const unused = d.channels.unused || [];
     const src = si.type === "catalog" ? `Catálogo${si.location ? ` (${esc(si.location)})` : ""}`
@@ -637,10 +712,23 @@
   }
 
   const STATUS_LOW = s => (UI.STATUS_TXT[s] || s || "—").toLowerCase();
+  /* entradas nuevas de la bitácora (van de la más nueva a la más vieja): las que quedaron
+     por encima de la que antes encabezaba la lista; con la lista vacía, todas */
+  const histKey = e => `${e.at}|${e.action}|${e.epoch}|${e.new}`;
+  function freshHistory(h) {
+    const top = h.length ? histKey(h[0]) : null, prev = R.hist;
+    R.hist = { rid: R.d.id, top };
+    if (!prev || prev.rid !== R.d.id || prev.top === top) return 0;
+    if (prev.top === null) return Math.min(h.length, 6);
+    const k = h.findIndex(e => histKey(e) === prev.top);
+    return k < 0 ? 0 : Math.min(k, 6);
+  }
+
   function renderHistory() {
     const h = R.d.history || [];
     const v = x => `<span class="chg">${esc(x == null ? "—" : x)}</span>`;
-    $("histList").innerHTML = h.length ? h.map(e => {
+    const fresh = freshHistory(h);
+    $("histList").innerHTML = h.length ? h.map((e, k) => {
       const at = UI.parse(e.at), ep = e.epoch != null ? e.epoch + 1 : null;
       const what = {
         set: e.old === e.new || e.stage === e.previous ? `confirmó la época ${ep} (${v(e.new)})`
@@ -652,7 +740,7 @@
         note: `agregó una nota: «${esc((e.new || "").length > 90 ? e.new.slice(0, 90) + "…" : e.new)}»`,
         retry: "reintentó el análisis (falló → en cola)"
       }[e.action] || esc(e.action);
-      return `<div><time>${UI.dShort(at)} ${UI.dTime(at)}</time>${esc(e.author)} ${what}</div>`;
+      return `<div${k < fresh ? ' class="fresh"' : ""}><time>${UI.dShort(at)} ${UI.dTime(at)}</time>${esc(e.author)} ${what}</div>`;
     }).join("") : '<div style="color:var(--muted)">Todavía no hay cambios: el hipnograma final es el del modelo.</div>';
   }
 
@@ -681,7 +769,7 @@
         const sl = [...(eeg === "eeg2" ? ["fpz", "pz"] : [eeg]), ...rest];
         return [k, Object.keys(cfg.channels).filter(s => sl.includes(s)).map(s => cfg.channels[s].name).join(" + ")];
       }));
-      if (R.tab === "perf") C.renderCombos($("c-combos2"), cfg.expected, names, d.combination, cfg.mf1_goal);
+      if (R.tab === "perf") C.renderCombos($("c-combos2"), cfg.expected, names, d.combination, cfg.mf1_goal, { key: d.id });
     }
     renderAgreement();
     renderArchCompare();
@@ -717,8 +805,8 @@
        <div class="n">${fmtInt(R.d.night.n_epochs - a.n_epochs)} sin estadio en la referencia</div></div>`;
     const cm = R.cmView === "final" ? f : a;
     $("cmCol").textContent = R.cmView === "final" ? "final" : "modelo";
-    C.renderConfusion($("c-cm"), cm.confusion, R.cmView === "final" ? "final" : "modelo");
-    C.renderF1($("c-f1"), a, R.corr.size ? f : null);
+    C.renderConfusion($("c-cm"), cm.confusion, R.cmView === "final" ? "final" : "modelo", { key: R.d.id });
+    C.renderF1($("c-f1"), a, R.corr.size ? f : null, { key: R.d.id });
   }
 
   function renderArchCompare() {
@@ -769,6 +857,7 @@
     if (stage !== null && prev === stage) { if (adv && R.autoAdvance) advance(wasFlagged); return; }
     if (stage === null) R.corr.delete(i); else R.corr.set(i, stage);
     ep.final[i] = stage === null ? pred : stage;
+    R.flash = stage === null ? null : { epoch: i, kind: stage === pred ? "ok" : "corr", t0: FX.now() };
     R.ev.clear();                                   // los perfiles típicos dependen del hipnograma final
     const p = push(i, stage);
     afterLocalChange();
@@ -875,7 +964,11 @@
     try {
       const out = await MaiaAPI.reviewAction(id, "finalize", expected);
       UI.closeDialog("finModal");
-      if (R.d && R.d.id === id) applyServer(out);
+      if (R.d && R.d.id === id) {
+        applyServer(out);
+        FX.pop($("revStatus"));                     // «Finalizada»: el sello se nota
+        FX.pop($("rStatus"));
+      }
       UI.toast("Revisión finalizada.");
     } catch (e) {
       if (e.code === "stale_summary") { UI.toast(e.message, true); openFinalize(); }
@@ -915,6 +1008,10 @@
   chipset("qFilt", b => { R.qFilt = b.dataset.f; renderQueue(); });
   chipset("sigWin", b => { V.win = +b.dataset.w; V.render(); renderHypno(); });
   $("viewTabs").onclick = e => { const b = e.target.closest("button[data-tab]"); if (b) setTab(b.dataset.tab); };
+  // leyenda del hipnograma → resaltar ese estadio o estado (el hipnograma lee data-focus de su contenedor)
+  const hypFocus = v => { if (v) $("c-hypno").dataset.focus = v; else delete $("c-hypno").dataset.focus; };
+  $("hypLegend").addEventListener("mouseover", e => { const it = e.target.closest("[data-hl]"); hypFocus(it && it.dataset.hl); });
+  $("hypLegend").addEventListener("mouseleave", () => hypFocus(null));
   $("qBody").onclick = e => {
     const tr = e.target.closest("tr[data-i]");
     if (tr) select(+tr.dataset.i);
