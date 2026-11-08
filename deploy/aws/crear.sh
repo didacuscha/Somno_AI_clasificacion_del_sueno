@@ -52,7 +52,8 @@ aws s3api put-bucket-tagging --bucket "$BUCKET" --tagging "TagSet=[{Key=proyecto
 say "Catálogo: las 32 noches de test de Sleep-EDFx (copia dentro de S3, desde PhysioNet)"
 for f in $(awk -F, '{ sub(/\r$/, "") } NR > 1 && $8 == "test" { print $6; print $7 }' "$INDEX"); do
   aws s3api head-object --bucket "$BUCKET" --key "catalog/$f" >/dev/null 2>&1 && continue
-  aws s3 cp --only-show-errors "$SOURCE/$f" "s3://$BUCKET/catalog/$f"
+  # --copy-props none: el bucket público de PhysioNet no deja leer las etiquetas de sus objetos
+  aws s3 cp --only-show-errors --copy-props none "$SOURCE/$f" "s3://$BUCKET/catalog/$f"
 done
 echo "$(aws s3 ls "s3://$BUCKET/catalog/" | wc -l | tr -d ' ') archivos en catalog/"
 
