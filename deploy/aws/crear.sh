@@ -36,7 +36,7 @@ done
 
 # 1 · S3: privado, cifrado, copias de la base por 30 días ─────────────────────────────
 say "S3: s3://$BUCKET"
-if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+if ! aws s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
   if [ "$REGION" = us-east-1 ]; then aws s3api create-bucket --bucket "$BUCKET" >/dev/null
   else aws s3api create-bucket --bucket "$BUCKET" --create-bucket-configuration LocationConstraint="$REGION" >/dev/null; fi
 fi
