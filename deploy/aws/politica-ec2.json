@@ -1,0 +1,29 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListarCatalogo",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::__BUCKET__"
+    },
+    {
+      "Sid": "LeerNoches",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::__BUCKET__/catalog/*"
+    },
+    {
+      "Sid": "EscribirCopiasDeLaBase",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::__BUCKET__/backups/*"
+    },
+    {
+      "Sid": "LeerAjustesCifrados",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "arn:aws:ssm:__REGION__:__ACCOUNT__:parameter/somnoai/*"
+    }
+  ]
+}

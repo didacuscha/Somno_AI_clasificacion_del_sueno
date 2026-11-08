@@ -1,12 +1,15 @@
 # SomnoAI v2 — despliegue con Docker
 #
+# Local:
 #   sh backend/data/demo/download_demos.sh     # las noches demo van por volumen
-#   docker compose up --build
-#   → API y tablero:  http://localhost:8000   (docs interactivas en /docs)
-#   → tablero aparte: http://localhost:8050   (nginx; el puerto abierto en la EC2 en v1)
+#   docker compose up --build                  # API y tablero → http://localhost:8000 (docs en /docs)
+#   docker compose --profile nginx up --build  # además, el tablero aparte con nginx → :8050
 #
-# Modelo: SOMNOAI_MODEL=provisional (por defecto) | api | mock   (api: valores en .env)
-#   SOMNOAI_MODEL=mock docker compose up
+# Servidor (EC2, ver deploy/aws/README.md): HTTPS con Caddy delante de la API
+#   docker compose --profile https up -d --build      # → https://$SOMNOAI_DOMAIN
+#
+# Ajustes y secretos en .env (fuera de git; plantilla en .env.example).
+# Modelo: SOMNOAI_MODEL=provisional (por defecto) | api | mock
 
 services:
   api:
@@ -15,14 +18,13 @@ services:
       dockerfile: backend/Dockerfile
     container_name: somnoai-api
     ports:
-      - "8000:8000"
+      # local: 8000. En el servidor, 127.0.0.1:8000 → solo Caddy llega a la API.
+      - "${SOMNOAI_API_PORT:-8000}:8000"
+    env_file:
+      - path: .env
+        required: false
     environment:
       SOMNOAI_MODEL: ${SOMNOAI_MODEL:-provisional}
-      # modelo del proyecto (SOMNOAI_MODEL=api): los valores van en .env, fuera de git
-      SOMNOAI_MODEL_API: ${SOMNOAI_MODEL_API:-}
-      SOMNOAI_MODEL_TOKEN: ${SOMNOAI_MODEL_TOKEN:-}
-      SOMNOAI_MODEL_NIGHTS: ${SOMNOAI_MODEL_NIGHTS:-}
-      SOMNOAI_MODEL_VERSION: ${SOMNOAI_MODEL_VERSION:-sistema-sueno-v7}
     volumes:
       # noches demo + base de datos + señales derivadas (persisten en el host)
       - ./backend/data:/app/data
@@ -35,8 +37,29 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # HTTPS automático (Let's Encrypt) para el servidor: solo con --profile https
+  https:
+    image: caddy:2.8.4-alpine
+    profiles: ["https"]
+    container_name: somnoai-https
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SOMNOAI_DOMAIN: ${SOMNOAI_DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data          # certificados: sobreviven a reinicios
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Tablero aparte con nginx (opcional): solo con --profile nginx
   front:
     image: nginx:alpine
+    profiles: ["nginx"]
     container_name: somnoai-front
     ports:
       - "8050:80"
@@ -46,3 +69,7 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -128,7 +128,8 @@ docs/
   API_CONTRACT.md          contrato tablero ↔ API
   MODEL_INTEGRATION.md     la frontera del adaptador del modelo
 .github/workflows/ci.yml   pruebas en cada pull request
-docker-compose.yml         API + tablero
+docker-compose.yml         API + tablero (+ HTTPS con Caddy en el servidor)
+deploy/                    Caddyfile · aws/: crear, actualizar y presupuesto
 ```
 
 ## Requisitos
@@ -209,8 +210,12 @@ Variables útiles:
 
 ```bash
 sh backend/data/demo/download_demos.sh     # los datos van por volumen, no en la imagen
-docker compose up --build                  # API y tablero :8000 · tablero aparte (nginx) :8050
+docker compose up --build                  # API y tablero :8000 (con --profile nginx, además :8050)
 ```
+
+### En AWS
+
+EC2 + Docker + S3, con HTTPS y copias diarias de la base: [`deploy/aws/README.md`](deploy/aws/README.md).
 
 ### Modo demo (solo el tablero, sin backend)
 
@@ -247,7 +252,7 @@ sintéticos. Sirve para mostrar la interfaz sin Python.
 ## Pruebas e integración continua
 
 ```bash
-cd backend && .venv/bin/pytest -q          # 80 pruebas, ~9 s, con el doble de pruebas del modelo
+cd backend && .venv/bin/pytest -q          # 84 pruebas, ~9 s, con el doble de pruebas del modelo
 ```
 
 Las pruebas generan EDF y EDF+ sintéticos con la estructura de Sleep-EDFx (no necesitan el
@@ -305,7 +310,8 @@ curl -s -X POST http://localhost:8000/api/v1/records/<id>/review -H "$H" \
       (`SPECTRAL_BANDS` en `app/config.py`).
 - [ ] Correr `scripts/make_subset_nights.py` contra el bucket del equipo (con Sebastián).
 - [x] Adaptador del modelo del proyecto por su API pública (`SOMNOAI_MODEL=api`).
-- [ ] Despliegue en AWS (EC2 + Docker + S3) y CI/CD.
+- [x] Despliegue en AWS: EC2 + Docker + S3, HTTPS, copias diarias de la base ([`deploy/aws/`](deploy/aws/README.md)).
+- [ ] CI/CD: desplegar automáticamente al hacer merge a main.
 
 ## Datos y referencias
 

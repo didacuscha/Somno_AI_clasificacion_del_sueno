@@ -1,0 +1,16 @@
+# Proxy HTTPS delante de la API (docker compose --profile https).
+# SOMNOAI_DOMAIN: p. ej. 3-91-10-20.sslip.io (la IP elástica del servidor, con guiones).
+# Caddy pide y renueva solo el certificado de Let's Encrypt, y redirige HTTP → HTTPS.
+{$SOMNOAI_DOMAIN} {
+	encode gzip
+	request_body {
+		max_size 700MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	reverse_proxy api:8000
+}
