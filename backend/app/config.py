@@ -34,9 +34,26 @@ UPLOAD_TTL_H = 24                       # cargas que nadie analizó: se borran a
 
 # ── modelo ────────────────────────────────────────────────────────────
 # provisional: YASA, estadificador abierto que corre aquí mismo (el modelo de la app).
+# api:         el modelo del proyecto (stacking) en SageMaker, por su API pública con token
+#              (app/model/remote.py).
 # mock:        doble de pruebas con resultados sintéticos deterministas (CI).
-# El modelo del proyecto se conectará después como otro adaptador (app/model/adapter.py).
 MODEL_BACKEND = os.environ.get("SOMNOAI_MODEL", "provisional")
+
+# ── modelo del proyecto por su API (SOMNOAI_MODEL=api) ────────────────
+# La URL y el token son secretos del servidor: van en .env (fuera de git), nunca en el
+# código ni en el tablero.
+MODEL_API = os.environ.get("SOMNOAI_MODEL_API", "").strip().rstrip("/")
+MODEL_TOKEN = os.environ.get("SOMNOAI_MODEL_TOKEN", "").strip()
+# Carpeta de S3 donde la API ya tiene las noches de test de Sleep-EDFx (s3://…/noches/):
+# esas no se vuelven a subir. Vacía = se sube cada noche.
+MODEL_NIGHTS = os.environ.get("SOMNOAI_MODEL_NIGHTS", "").strip()
+if MODEL_NIGHTS and not MODEL_NIGHTS.endswith("/"):
+    MODEL_NIGHTS += "/"
+# La API no informa qué versión sirve: se declara aquí (el tag del repositorio del modelo).
+MODEL_VERSION = os.environ.get("SOMNOAI_MODEL_VERSION", "sistema-sueno-v7")
+# El endpoint se apaga tras 5 min sin uso y tarda ~8 min en prender: el tope cubre eso de sobra.
+MODEL_TIMEOUT_MIN = float(os.environ.get("SOMNOAI_MODEL_TIMEOUT_MIN", "25"))
+MODEL_POLL_S = float(os.environ.get("SOMNOAI_MODEL_POLL_S", "10"))
 WORKERS = int(os.environ.get("SOMNOAI_WORKERS", "1"))
 # Al arrancar con la base vacía, analiza unas noches del catálogo para que el tablero no empiece en blanco.
 SEED_DEMOS = os.environ.get("SOMNOAI_SEED_DEMOS", "1") == "1"

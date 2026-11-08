@@ -5,7 +5,7 @@
 #   → API y tablero:  http://localhost:8000   (docs interactivas en /docs)
 #   → tablero aparte: http://localhost:8050   (nginx; el puerto abierto en la EC2 en v1)
 #
-# Modelo: SOMNOAI_MODEL=provisional (por defecto) | mock | sagemaker
+# Modelo: SOMNOAI_MODEL=provisional (por defecto) | api | mock   (api: valores en .env)
 #   SOMNOAI_MODEL=mock docker compose up
 
 services:
@@ -18,6 +18,11 @@ services:
       - "8000:8000"
     environment:
       SOMNOAI_MODEL: ${SOMNOAI_MODEL:-provisional}
+      # modelo del proyecto (SOMNOAI_MODEL=api): los valores van en .env, fuera de git
+      SOMNOAI_MODEL_API: ${SOMNOAI_MODEL_API:-}
+      SOMNOAI_MODEL_TOKEN: ${SOMNOAI_MODEL_TOKEN:-}
+      SOMNOAI_MODEL_NIGHTS: ${SOMNOAI_MODEL_NIGHTS:-}
+      SOMNOAI_MODEL_VERSION: ${SOMNOAI_MODEL_VERSION:-sistema-sueno-v7}
     volumes:
       # noches demo + base de datos + señales derivadas (persisten en el host)
       - ./backend/data:/app/data

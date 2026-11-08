@@ -11,3 +11,5 @@ backend/tests
 **/.pytest_cache
 *.pyc
 .DS_Store
+.env
+*.pem

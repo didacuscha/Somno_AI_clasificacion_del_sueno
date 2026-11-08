@@ -291,14 +291,17 @@
       out.push(alertBox("w", "!", `${esc(d.combination_name)} es de las combinaciones de canales menos precisas.`,
         "Conviene revisar con más atención. Si el registro tiene Fpz-Cz o EOG, agregarlos mejora la estadificación."));
     }
-    if (d.model.kind !== "sagemaker") {
+    {
+      // qué modelo estadificó la noche (cada noche guarda el suyo) y sus avisos
+      const ABOUT = {
+        mock: "Este análisis no viene de ningún modelo entrenado: sirve para probar la aplicación.",
+        provisional: "Es un estadificador abierto que se usa mientras se integra el modelo del proyecto.",
+        proyecto: "El sistema del proyecto de grado: XGBoost sobre rasgos de la señal y una red CNN/Transformer, combinados por un meta-modelo.",
+      };
       const notes = (d.model.notes || []).map(n => `<li>${esc(n)}</li>`).join("");
       out.push(alertBox(d.model.kind === "mock" ? "w" : "i", "i",
         d.model.kind === "mock" ? "Resultados simulados." : `Estadificado con el ${esc((d.model.name || "Modelo provisional").replace(/^./, c => c.toLowerCase()))}.`,
-        (d.model.kind === "mock"
-          ? "Este análisis no viene de ningún modelo entrenado: sirve para probar la aplicación."
-          : "Es un estadificador abierto que se usa mientras se integra el modelo del proyecto.") +
-        (notes ? `<ul>${notes}</ul>` : "")));
+        (ABOUT[d.model.kind] || "") + (notes ? `<ul>${notes}</ul>` : "")));
     }
     $("resAlerts").innerHTML = out.join("");
   }

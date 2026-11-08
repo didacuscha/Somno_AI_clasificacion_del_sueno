@@ -5,8 +5,10 @@
 - `read_window` entrega la señal de la ventana de cada canal a su frecuencia nativa
   (lo que recibe el modelo); `to_common_rate` la lleva a una sola frecuencia (visor).
 - `subset_edf` copia un EDF con solo algunos canales, byte a byte (sin recuantizar).
+- `relabel_edf` copia un EDF cambiando solo el nombre de algunos canales.
 """
 import re
+import shutil
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -219,3 +221,24 @@ def subset_edf(src: str, dst: str, keep: list[str]):
                 if len(rec) < record_bytes:
                     break
                 out.write(b"".join(rec[starts[i]:starts[i] + 2 * spr[i]] for i in idx))
+
+
+def relabel_edf(src: str, dst: str, renames: dict[str, str]):
+    """Copia `src` en `dst` cambiando el nombre de los canales de `renames` (viejo → nuevo).
+    Solo se reescriben los campos de etiqueta del encabezado (16 caracteres ASCII);
+    las muestras quedan idénticas."""
+    head = read_header(src)
+    labels = head["labels"]
+    missing = set(renames) - set(labels)
+    if missing:
+        raise InvalidFile(f"{src} no tiene los canales {', '.join(sorted(missing))}.")
+    new = [renames.get(lab, lab) for lab in labels]
+    if len(set(new)) != len(new):
+        raise InvalidFile("Al renombrar los canales quedarían dos con el mismo nombre.")
+    for name in renames.values():
+        if len(name) > 16 or not name.isascii():
+            raise InvalidFile(f"«{name}» no cabe como etiqueta de canal EDF (16 caracteres ASCII).")
+    shutil.copyfile(src, dst)
+    with open(dst, "r+b") as fh:
+        fh.seek(256)
+        fh.write(b"".join(lab.encode("ascii").ljust(16) for lab in new))

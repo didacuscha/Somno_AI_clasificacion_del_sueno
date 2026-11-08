@@ -69,11 +69,10 @@ noche (`SOMNOAI_MODEL`):
 | Adaptador | Qué hace |
 |---|---|
 | `provisional` (por defecto) | YASA, un estadificador abierto que corre en la API: resultados reales sobre la señal mientras se integra el modelo del proyecto. |
+| `api` | **El modelo del proyecto**: el stacking (XGBoost + CNN/Transformer + meta-modelo; ver [el repositorio del modelo](https://github.com/juancasas1996/MAIA_Trabajo_de_Grado_DeepSleep_Stacking)) en un endpoint de SageMaker, por su API pública con token. |
 | `mock` | Doble de pruebas con probabilidades sintéticas deterministas (pruebas y CI). |
 
-El stacking del proyecto (XGBoost + CNN/Transformer + meta-modelo; ver
-[el repositorio del proyecto](https://github.com/juancasas1996/MAIA_Trabajo_de_Grado_DeepSleep_Stacking))
-se conectará después como otro adaptador, sin tocar el pipeline ni la interfaz:
+Cómo se conecta el modelo del proyecto, qué se configura y sus límites:
 [`docs/MODEL_INTEGRATION.md`](docs/MODEL_INTEGRATION.md).
 
 ## Arquitectura
@@ -81,7 +80,7 @@ se conectará después como otro adaptador, sin tocar el pipeline ni la interfaz
 ```
 ┌──────────────────┐  HTTP/JSON   ┌───────────────────────────────┐  StagingRequest  ┌─────────────────────┐
 │ Tablero          │ ───────────► │ API (FastAPI)                 │ ───────────────► │ Adaptador del modelo│
-│ HTML + JS puro   │ docs/API_    │ catálogo · cargas · pipeline  │ ◄─────────────── │ provisional · mock  │
+│ HTML + JS puro   │ docs/API_    │ catálogo · cargas · pipeline  │ ◄─────────────── │ provisional · api   │
 │ (sin build)      │ CONTRACT.md  │ por pasos · SQLite · revisión │  estadio + probs │                     │
 └──────────────────┘              └──────────────┬────────────────┘                  └─────────────────────┘
                                                  │ encabezados por rango · descarga al analizar
@@ -155,6 +154,9 @@ backend/run.sh
 ```
 
 Credenciales del prototipo: **superusuario / somnoai2026** (más cuentas con `SOMNOAI_USERS`).
+
+Para usar el modelo del proyecto, copie `.env.example` como `.env` en la raíz y complete la URL y
+el token de su API (`backend/run.sh` y `docker compose` leen ese archivo; está en `.gitignore`).
 Con la base vacía, el primer arranque lanza cuatro análisis de muestra sobre las noches demo del
 catálogo (combinaciones distintas, incluida Pz-Oz sola, que queda bajo la meta). La documentación
 interactiva de la API está en `http://localhost:8000/docs`.
@@ -190,7 +192,10 @@ Variables útiles:
 
 | Variable | Valor por defecto | |
 |---|---|---|
-| `SOMNOAI_MODEL` | `provisional` | `provisional` o `mock` |
+| `SOMNOAI_MODEL` | `provisional` | `provisional`, `api` (modelo del proyecto) o `mock` |
+| `SOMNOAI_MODEL_API` · `SOMNOAI_MODEL_TOKEN` | — | URL y token de la API del modelo del proyecto (**secretos**: solo en `.env`) |
+| `SOMNOAI_MODEL_NIGHTS` | — | `s3://…/noches/` donde la API ya tiene las noches de test (no se vuelven a subir) |
+| `SOMNOAI_MODEL_VERSION` | `sistema-sueno-v7` | versión que sirve el endpoint (la API no la informa) |
 | `SOMNOAI_CATALOG` | `backend/data/demo` | catálogo de noches: una carpeta o `s3://bucket/prefijo/` |
 | `SOMNOAI_S3_ANONYMOUS` | `auto` | `1` lee S3 sin firmar, `0` exige credenciales, `auto` decide según haya credenciales |
 | `AWS_REGION` | `us-east-1` | región del bucket |
@@ -242,7 +247,7 @@ sintéticos. Sirve para mostrar la interfaz sin Python.
 ## Pruebas e integración continua
 
 ```bash
-cd backend && .venv/bin/pytest -q          # 57 pruebas, ~4 s, con el doble de pruebas del modelo
+cd backend && .venv/bin/pytest -q          # 80 pruebas, ~9 s, con el doble de pruebas del modelo
 ```
 
 Las pruebas generan EDF y EDF+ sintéticos con la estructura de Sleep-EDFx (no necesitan el
@@ -299,7 +304,8 @@ curl -s -X POST http://localhost:8000/api/v1/records/<id>/review -H "$H" \
 - [ ] Ajustar las bandas de la evidencia espectral con la investigación de Juan Camilo
       (`SPECTRAL_BANDS` en `app/config.py`).
 - [ ] Correr `scripts/make_subset_nights.py` contra el bucket del equipo (con Sebastián).
-- [ ] Fuera de este alcance: adaptador de SageMaker, despliegue y CI/CD.
+- [x] Adaptador del modelo del proyecto por su API pública (`SOMNOAI_MODEL=api`).
+- [ ] Despliegue en AWS (EC2 + Docker + S3) y CI/CD.
 
 ## Datos y referencias
 
