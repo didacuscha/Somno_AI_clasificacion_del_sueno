@@ -11,18 +11,19 @@ La versión del modelo y sus reglas de confianza (umbral, aviso de noche complet
 las reporta el propio adaptador en `info()`; quedan guardadas con cada noche.
 
 Adaptadores (variable SOMNOAI_MODEL):
-  provisional  YASA corriendo en la misma API (el modelo de la aplicación por ahora).
+  provisional  YASA corriendo en la misma API.
+  api          el modelo del proyecto (stacking) en SageMaker, por su API pública (remote.py).
   mock         doble de pruebas con resultados sintéticos deterministas (CI).
 
-Para conectar otro modelo (el stacking del proyecto en SageMaker, más adelante) basta
-con una clase nueva que cumpla `ModelAdapter` y registrarla en `get_adapter()`; el
-pipeline y la interfaz no cambian. Contrato completo en docs/MODEL_INTEGRATION.md.
+Para conectar otro modelo basta con una clase nueva que cumpla `ModelAdapter` y
+registrarla en `get_adapter()`; el pipeline y la interfaz no cambian. Contrato
+completo en docs/MODEL_INTEGRATION.md.
 """
 import logging
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
-from typing import Protocol, Sequence
+from typing import Callable, Protocol, Sequence
 
 import numpy as np
 
@@ -67,6 +68,7 @@ class StagingRequest:
     lights_off_s: float | None          # apagado de luces en s desde el inicio del registro; None = inicio de la ventana
     epoch_s: int = config.EPOCH_S
     source: str | None = None           # archivo original (para adaptadores que necesiten el EDF completo)
+    progress: Callable[[str], None] | None = None   # mensaje del paso «Predecir» (p. ej. «esperando al modelo»)
 
     @property
     def n_epochs(self) -> int:
@@ -150,8 +152,12 @@ def _configured() -> ModelAdapter:
             return ProvisionalAdapter()
         except ImportError as e:
             log.warning("No se pudo cargar el modelo provisional (%s); se usa el simulado.", e)
+    elif kind == "api":
+        # sin caer al simulado: si falta la configuración, cada análisis falla diciendo qué falta
+        from .remote import RemoteAdapter
+        return RemoteAdapter()
     elif kind != "mock":
-        log.warning("SOMNOAI_MODEL=%s no existe (use provisional o mock); se usa el simulado.", kind)
+        log.warning("SOMNOAI_MODEL=%s no existe (use provisional, api o mock); se usa el simulado.", kind)
     from .mock import MockAdapter
     return MockAdapter()
 

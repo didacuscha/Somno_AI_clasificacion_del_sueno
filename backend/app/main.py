@@ -572,6 +572,17 @@ def export_corrections(_: dict = Depends(auth)):
 
 # ── tablero ───────────────────────────────────────────────────────────
 # Servir el frontend desde la misma API evita CORS y un segundo proceso en local.
+class _Frontend(StaticFiles):
+    """El HTML se revalida siempre (ETag → 304 si no cambió): tras un despliegue, recargar
+    trae la versión nueva. Los scripts se versionan con ?v=N en index.html."""
+
+    async def get_response(self, path, scope):
+        res = await super().get_response(path, scope)
+        if res.headers.get("content-type", "").startswith("text/html"):
+            res.headers["Cache-Control"] = "no-cache"
+        return res
+
+
 _FRONT = Path(os.environ.get("SOMNOAI_FRONTEND_DIR", config.BASE_DIR.parent / "frontend"))
 if _FRONT.is_dir():
-    app.mount("/", StaticFiles(directory=_FRONT, html=True), name="frontend")
+    app.mount("/", _Frontend(directory=_FRONT, html=True), name="frontend")

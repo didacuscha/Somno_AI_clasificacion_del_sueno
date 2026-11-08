@@ -381,3 +381,12 @@ def test_borrado(client, headers):
     assert client.get(f"{API}/records/{d['id']}", headers=headers).status_code == 404
     assert client.delete(f"{API}/records/{d['id']}", headers=headers).status_code == 404
     assert not Path(config.SIGNAL_DIR / d["id"]).exists()
+
+
+def test_el_tablero_se_revalida_tras_un_despliegue(client):
+    page = client.get("/")
+    assert page.status_code == 200 and page.headers["cache-control"] == "no-cache"
+    again = client.get("/", headers={"If-None-Match": page.headers["etag"]})
+    assert again.status_code == 304                     # sin cambios: no se vuelve a descargar
+    script = client.get("/js/config.js")
+    assert script.status_code == 200 and "cache-control" not in script.headers

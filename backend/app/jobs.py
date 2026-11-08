@@ -314,7 +314,7 @@ def _run(job: Job, summary: dict):
             req = model.StagingRequest(
                 record_id=rid, epochs=model_epochs, fs={s: raw[lab][1] for s, lab in job.selected.items()},
                 labels=dict(job.selected), start_epoch=a, lights_off_s=job.lights_off_s, epoch_s=EP,
-                source=psg)
+                source=psg, progress=steps.note)
             res = adapter.predict(req)
             stages, probs = model.validate(res, req)
             steps.done("predict", f"{info.version}")

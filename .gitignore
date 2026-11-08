@@ -13,3 +13,7 @@ backend/data/store/
 
 # temporales
 *.part
+
+# secretos: nunca al repositorio (plantilla sin secretos en .env.example)
+.env
+*.pem
