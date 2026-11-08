@@ -12,9 +12,11 @@
 #
 # Variables: AWS_REGION (us-east-1) · BRANCH (main) · INSTANCE_TYPE (t3.small) · REPO
 set -euo pipefail
+SETTINGS=${1:?uso: deploy/aws/crear.sh <archivo con los ajustes del modelo>}
+[ -f "$SETTINGS" ] || { echo "no existe $SETTINGS" >&2; exit 1; }
+SETTINGS="$(cd "$(dirname "$SETTINGS")" && pwd)/$(basename "$SETTINGS")"   # antes del cd
 cd "$(dirname "$0")"
 
-SETTINGS=${1:?uso: deploy/aws/crear.sh <archivo con los ajustes del modelo>}
 REGION=${AWS_REGION:-us-east-1}
 NAME=somnoai
 REPO=${REPO:-didacuscha/Somno_AI_clasificacion_del_sueno}
