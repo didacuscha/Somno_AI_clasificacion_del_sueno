@@ -14,12 +14,23 @@ ID=$(aws ec2 describe-instances --filters Name=tag:Name,Values=somnoai Name=inst
   --query 'Reservations[0].Instances[0].InstanceId' --output text)
 [ "$ID" != None ] || { echo "no hay un servidor somnoai encendido en $REGION" >&2; exit 1; }
 
+# Session Manager corre esto con /bin/sh (dash en Ubuntu: no tiene pipefail) y sin HOME.
+# Además, el aws del snap lanzado desde Session Manager deja vacío el archivo si su salida
+# va directo a él: por eso pasa por «| cat». Y como sin pipefail una falla de aws no se
+# notaría, los ajustes se revisan ANTES de reemplazar el .env y de tocar el código.
 script=$(cat <<EOF
-set -euo pipefail
+set -eu
+export HOME=/root
 cd /opt/somnoai
-git fetch --depth 1 origin $BRANCH
-git checkout -B $BRANCH FETCH_HEAD
-( umask 077; /snap/bin/aws ssm get-parameter --region $REGION --name /somnoai/env --with-decryption --query Parameter.Value --output text > .env )
+( umask 077; /snap/bin/aws ssm get-parameter --region $REGION --name /somnoai/env --with-decryption --query Parameter.Value --output text | cat > .env.nuevo )
+if ! grep -q '^SOMNOAI_DOMAIN=.' .env.nuevo || ! grep -q '^SOMNOAI_MODEL=.' .env.nuevo; then
+  rm -f .env.nuevo
+  echo "los ajustes de /somnoai/env llegaron vacíos o incompletos: el servidor no se tocó" >&2
+  exit 1
+fi
+mv .env.nuevo .env
+git fetch --depth 1 origin "$BRANCH"
+git checkout -B "$BRANCH" FETCH_HEAD
 docker compose --profile https up -d --build
 docker image prune -f >/dev/null
 git log --oneline -1
