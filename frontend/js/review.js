@@ -33,7 +33,11 @@
     pollTimer: null,
     viewerTimer: null,
     ev: new Map(),               // evidencia: "época|canal" → respuesta
-    evShow: new Set(),           // épocas no marcadas con la evidencia abierta
+    evBusy: new Set(),           // evidencia: claves pedidas que aún no llegan
+    evGen: 0,                    // sube con cada decisión: las respuestas viejas no se guardan
+    evTimer: null,
+    evLast: "",                  // última evidencia dibujada: queda atenuada mientras llega la nueva
+    evOpen: true,                // evidencia visible (se puede ocultar; vuelve a verse al abrir otra noche)
     evChannel: null,
     watch: null,                 // análisis que sigue el diálogo de avance
     flash: null,                 // última decisión {epoch, kind: ok|corr, t0}: su destello
@@ -41,6 +45,8 @@
     arch: null,                  // cifras de arquitectura: de qué valores vienen y desde cuándo
     hist: null,                  // bitácora: qué entrada la encabezaba (para resaltar las nuevas)
     freshNote: false,            // la nota recién guardada se resalta al dibujarse
+    hypZoom: null,               // tramo acercado del hipnograma [e0, e1] en épocas (US-08)
+    hypNote: false,              // aviso «las dos vistas coinciden» tras tocar la vista (US-01)
     go: () => {},
     onChange: () => {}
   };
@@ -140,7 +146,11 @@
       msg.textContent = "El análisis corre en el servidor. Si cierra esta ventana sigue en segundo plano y queda en Registros.";
       if (!$("pwBg")) {
         btns.innerHTML = '<button class="ghost" id="pwBg">Seguir en segundo plano</button>';
-        $("pwBg").onclick = () => UI.closeDialog("procModal");
+        $("pwBg").onclick = () => {
+          UI.closeDialog("procModal");
+          R.go("vList");
+          UI.toast("El análisis sigue en el servidor. Su avance se ve aquí, en Registros.");
+        };
       }
     }
   }
@@ -226,18 +236,27 @@
     R.corr = new Map(d.corrections.map(c => [c.epoch, c.stage]));
     if (first) {
       R.ev.clear();
-      R.evShow.clear();
+      R.evGen++;
+      R.evLast = "";
+      R.evOpen = true;
       R.evChannel = null;
       R.flash = null;
       R.morph = {};
       R.arch = null;
       $("c-hypno")._fx = null;                      // el hipnograma se vuelve a dibujar de izquierda a derecha
+      R.hypZoom = null;
+      R.hypNote = false;
       R.sel = nextPending(-1, 1) ?? d.epochs.review.indexOf(1);
       if (R.sel < 0) R.sel = 0;
       V.init($("c-signal"), d, {
         epoch: R.sel, win: V.win || 90, gain: 1, corr: R.corr, info: R.cfg.channels,
-        channels: d.channels.selected.filter(s => s in d.channels.available), onSelect: select
+        channels: d.channels.selected.filter(s => s in d.channels.available), onSelect: select,
+        onZoom: () => renderZoom()
       });
+      renderZoom({ hyp: false });
+      $("epGotoIn").value = "";
+      $("epGotoErr").textContent = "";
+      $("epGotoIn").removeAttribute("aria-invalid");
       setTab("clin");
     }
     V.d = d;
@@ -355,8 +374,56 @@
     C.renderHypnogram($("c-hypno"), d, {
       view: R.view, selected: R.sel, corr: R.corr, onSelect: select,
       viewRange: V.d ? V.range().map(t => t / d.night.epoch_s) : null,
-      flash: age < 520 ? { epoch: R.flash.epoch, color: FLASH[R.flash.kind], age } : null
+      flash: age < 520 ? { epoch: R.flash.epoch, color: FLASH[R.flash.kind], age } : null,
+      zoom: R.hypZoom, onZoom: setHypZoom
     });
+    renderHypHead();
+  }
+
+  /* qué muestra el hipnograma (vista y tramo) y, si la vista no cambia nada, por qué (US-01, US-08) */
+  function renderHypHead() {
+    const d = R.d, rv = localReview(), c = rv.corrected, z = R.hypZoom;
+    const viewTxt = R.view === "predicted"
+      ? (c ? `Mostrando solo el modelo, sin ${c === 1 ? "la corrección" : `las ${c} correcciones`} del revisor. ` : "Mostrando solo el modelo. ")
+      : (c ? `Mostrando el hipnograma final: el modelo con ${c} corrección${c === 1 ? "" : "es"} del revisor. ` : "");
+    let zoomTxt = "Haga clic en cualquier momento de la noche para revisar esa época, o arrastre para acercar un tramo.";
+    if (z) {
+      const a = clockOf(z[0]), b = clockOf(z[1]), len = fmtHM((z[1] - z[0]) * d.night.epoch_s);
+      zoomTxt = `Acercado${a != null ? ` de ${clockHM(a)} a ${clockHM(b)}` : ""} (${len}). Arrastre para acercar más; ` +
+        "doble clic o «Ver toda la noche» para volver.";
+    }
+    $("hypCap").textContent = viewTxt + zoomTxt;
+    $("hypReset").classList.toggle("hidden", !z);
+    if (c) R.hypNote = false;
+    const note = $("hypNote");
+    note.classList.toggle("hidden", !R.hypNote);
+    if (R.hypNote) {
+      note.textContent = "Aún no hay cambios de revisión: las dos vistas coinciden. " + (rv.confirmed
+        ? "Las épocas confirmadas conservan el estadio del modelo; solo una corrección cambia el hipnograma final."
+        : "Cuando corrija una época, la vista «Final» la mostrará con su nuevo estadio.");
+    }
+  }
+
+  function setHypZoom(z) {
+    if (!R.d) return;
+    const n = R.d.night.n_epochs;
+    R.hypZoom = z ? [Math.max(0, z[0]), Math.min(n, z[1])] : null;
+    renderHypno();
+  }
+
+  /* zoom de tiempo del visor (US-07): «Zoom −/+», cuánto se ve, ‹ › para moverse con el mismo
+     zoom (inactivas en el borde de la época) y cómo volver */
+  function renderZoom({ hyp = true } = {}) {
+    const on = !!R.d && V.zoomed();
+    const span = on ? Math.round((V.zoom[1] - V.zoom[0]) * 10) / 10 : 0;
+    $("zoomVal").textContent = on ? `${nf(span, span % 1 ? 1 : 0)} s` : "sin zoom";
+    $("zoomPlus").disabled = !R.d || !V.canZoom(1);
+    $("zoomMinus").disabled = !on;
+    $("panBtns").classList.toggle("hidden", !on);
+    $("zoomReset").classList.toggle("hidden", !on);
+    $("panL").disabled = !on || !V.canPan(-1);
+    $("panR").disabled = !on || !V.canPan(1);
+    if (hyp && R.d) renderHypno();
   }
 
   /* ── visor: canales y amplitud (US-19) ── */
@@ -432,61 +499,80 @@
     const pred = ep.stage[i], second = ep.second[i], fin = ep.final[i], p = ep.probs[i];
     const decided = R.corr.has(i), flagged = ep.review[i] === 1;
     const t = clockOf(i);
+    // estado de la época: la que el modelo entregó con confianza no se confunde con una pendiente (US-04)
     const statusTxt = {
       pending: '<span class="pill w">Marcada · pendiente</span>',
-      confirmed: '<span class="pill ok">Confirmada</span>',
+      confirmed: '<span class="pill ok">✓ Confirmada</span>',
       corrected: `<span class="pill c">Corregida: ${STG[pred].k} → ${STG[fin].k}</span>`
-    }[st] || `<span class="pill">Entregada por el modelo (confianza ${Math.round(100 * ep.confidence[i])} %)</span>`;
+    }[st] || `<span class="pill auto" title="El modelo la entregó con confianza de al menos ${nf(d.model.threshold, 2)}: no está marcada para revisar. Puede cambiarla si quiere.">` +
+      '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.4"/>' +
+      '<path d="M5.2 8.3l1.9 1.9 3.8-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+      `No requiere revisión · confianza ${Math.round(100 * ep.confidence[i])} %</span>`;
     const who = authorOf(i);
+    const KEY = ["W", "1", "2", "3", "R"];
+    // 1.ª opción = confirmar el estadio del modelo; 2.ª u otro estadio = corregir (US-03)
+    // la 1.ª opción se señala como vigente cuando la época no está marcada y nadie decidió
+    const cur = !decided && !flagged;
     const opt = (k, rank) => `<button type="button" data-st="${k}" aria-pressed="${decided && fin === k}" ${locked() ? "disabled" : ""}
-        title="${rank === 1 ? "Tecla A" : "Tecla B"}"><span class="r">${rank}.ª opción</span>
+        class="${rank === 1 && cur ? "cur" : ""}"
+        title="${rank === 1 ? `Confirmar ${STG[k].k}, el estadio del modelo (tecla A o Enter)` : `Corregir a ${STG[k].k} (tecla B)`}"><span class="r">${rank}.ª opción</span>
         <span class="s"><i style="background:${STG[k].c}"></i>${STG[k].k}</span><span class="p">${Math.round(100 * p[k])} % de probabilidad</span></button>`;
+    const others = STG.map((_, k) => k).filter(k => k !== pred && k !== second);
+    // tres columnas de tarjetas: la época y sus vecinas con las probabilidades debajo; las opciones;
+    // la evidencia de la señal (US-04 del diseño aprobado)
     $("insp").innerHTML = `
-      <div class="ep"><span>Época ${i + 1} <span class="tm">de ${fmtInt(n)}</span></span>
-        <span class="tm">${t != null ? `${clockHMS(t)} – ${clockHMS(t + EP)}` : ""}</span></div>
-      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">${statusTxt}
-        ${who && st ? `<span class="mini" style="margin:0">por ${esc(who)}</span>` : ""}</div>
-      <h4>Épocas vecinas${UI.info("context")}</h4>
-      <div class="ctx">${contextCell(i - 1, "Anterior")}
-        <div class="cur"><div class="w">Esta · ${i + 1}</div><div class="sv" style="color:${decided || !flagged ? STG[fin].c : "var(--warn-text)"}">${decided || !flagged ? STG[fin].k : "?"}</div>
-          <div class="o">${esc(originText(i))}</div></div>
-        ${contextCell(i + 1, "Siguiente")}</div>
-      <h4>${flagged ? "El modelo duda entre" : "Opciones del modelo"}${UI.info("top2")}</h4>
-      <div class="top2" id="iTop2">${opt(pred, 1)}${opt(second, 2)}</div>
-      <div class="otherlbl">Otro estadio</div>
-      <div class="stagebtns">${STG.map((s, k) => `<button data-st="${k}" aria-pressed="${decided && k === fin}"
-        ${locked() ? "disabled" : ""} style="${decided && k === fin ? `background:${s.c}` : ""}" title="${s.k} · tecla ${["W", "1", "2", "3", "R"][k]}">
-        ${s.k}<small>${["W", "1", "2", "3", "R"][k]}</small></button>`).join("")}</div>
-      <div class="ibtns">
-        <button class="ghost" id="iConfirm" ${locked() || (st === "confirmed") ? "disabled" : ""}
-          title="Enter">✓ Confirmar ${STG[pred].k}</button>
-        <button class="ghost" id="iRevert" ${locked() || !decided ? "disabled" : ""}
-          title="Retroceso">↺ Volver al modelo</button>
+      <div class="icol">
+        <section class="icard" aria-label="Época seleccionada">
+          <div class="ep"><span class="en">Época ${fmtInt(i + 1)} <span class="of">de ${fmtInt(n)}</span></span>
+            ${t != null ? `<span class="tchip">${clockHMS(t)} – ${clockHMS(t + EP)}</span>` : ""}</div>
+          <div class="epst">${statusTxt}
+            ${who && st ? `<span class="mini" style="margin:0">por ${esc(who)}</span>` : ""}</div>
+          <h4 class="sep">Épocas vecinas${UI.info("context")}</h4>
+          <div class="ctx">${contextCell(i - 1, "Anterior")}
+            <div class="cur"><div class="w">Esta · ${i + 1}</div><div class="sv" style="color:${decided || !flagged ? STG[fin].c : "var(--warn-text)"}">${decided || !flagged ? STG[fin].k : "?"}</div>
+              <div class="o">${esc(originText(i))}</div></div>
+            ${contextCell(i + 1, "Siguiente")}</div>
+        </section>
+        <section class="icard fill" aria-label="Probabilidades del modelo">
+          <div class="ihead"><h4>Probabilidades del modelo${UI.info("confidence")}</h4><span class="ihint">Distribución total</span></div>
+          ${STG.map((s, k) => `<div class="pbar ${k === pred ? "top" : ""}"><span>${s.k}</span>
+            <span class="tr"><span class="fi" style="display:block;width:${(100 * p[k]).toFixed(1)}%;background:${s.c}"></span></span>
+            <span>${Math.round(100 * p[k])} %</span></div>`).join("")}
+        </section>
       </div>
-      ${locked() ? '<div class="mini">La revisión está finalizada. Reábrala para hacer cambios.</div>' : ""}
-      <h4>Probabilidades del modelo${UI.info("confidence")}</h4>
-      ${STG.map((s, k) => `<div class="pbar ${k === pred ? "top" : ""}"><span>${s.k}</span>
-        <span class="tr"><span class="fi" style="display:block;width:${(100 * p[k]).toFixed(1)}%;background:${s.c}"></span></span>
-        <span>${Math.round(100 * p[k])} %</span></div>`).join("")}
-      <h4>Evidencia de la señal${UI.info("evidence")}</h4>
-      <div id="iEvid"></div>
-      <div class="inav">
-        <button class="ghost" id="iPrev" ${i === 0 ? "disabled" : ""}>← Época</button>
-        <button class="ghost" id="iNext" ${i === n - 1 ? "disabled" : ""}>Época →</button>
-        <button class="ghost" id="iPrevF">« Pendiente</button>
-        <button class="ghost" id="iNextF">Pendiente »</button>
-      </div>
-      <label class="chk"><input type="checkbox" id="iAuto" ${R.autoAdvance ? "checked" : ""}>
-        Pasar a la siguiente pendiente al decidir</label>`;
+      <section class="icard" aria-label="Opciones del modelo">
+        <h4>${flagged ? "El modelo duda entre" : "Opciones del modelo"}${UI.info("top2")}</h4>
+        <div class="top2" id="iTop2">${opt(pred, 1)}${opt(second, 2)}</div>
+        <div class="dhint">La 1.ª opción confirma el estadio del modelo; la 2.ª u otro estadio lo corrigen.</div>
+        <div class="otherlbl">Otro estadio</div>
+        <div class="stagebtns">${others.map(k => `<button data-st="${k}" aria-pressed="${decided && k === fin}"
+          ${locked() ? "disabled" : ""} style="${decided && k === fin ? `background:${STG[k].c}` : ""}" title="Corregir a ${STG[k].k} · tecla ${KEY[k]}">
+          ${STG[k].k}<small>${KEY[k]}</small></button>`).join("")}</div>
+        <div class="igap"></div>
+        <div class="ifoot">
+          <button class="ghost wide" id="iRevert" ${locked() || !decided ? "disabled" : ""}
+            title="${decided ? `Quita su decisión: la época vuelve al estadio que propuso el modelo (${STG[pred].k}). Tecla Retroceso.` : "Todavía no decidió nada en esta época."}">↺ Deshacer mi decisión</button>
+          ${locked() ? '<div class="mini" style="margin-top:8px">La revisión está finalizada. Reábrala para hacer cambios.</div>' : ""}
+          <label class="chk"><input type="checkbox" id="iAuto" ${R.autoAdvance ? "checked" : ""}>
+            Pasar a la siguiente pendiente al decidir</label>
+        </div>
+      </section>
+      <section class="icard" aria-label="Evidencia de la señal">
+        <div class="ihead"><h4>Evidencia de la señal${UI.info("evidence")}</h4>
+          <button type="button" class="linkbtn evtgl" id="iEvTgl" aria-controls="iEvid" aria-expanded="${R.evOpen}">${R.evOpen ? "Ocultar evidencia" : "Mostrar evidencia"}</button></div>
+        <div id="iEvid"></div>
+      </section>`;
     $("insp").querySelectorAll("button[data-st]").forEach(b => b.onclick = () => setStage(+b.dataset.st));
     $("insp").querySelectorAll("button[data-go]").forEach(b => b.onclick = () => select(+b.dataset.go));
-    $("iConfirm").onclick = () => setStage(pred);
     $("iRevert").onclick = () => setStage(null);
-    $("iPrev").onclick = () => select(i - 1);
-    $("iNext").onclick = () => select(i + 1);
-    $("iPrevF").onclick = () => jumpPending(-1);
-    $("iNextF").onclick = () => jumpPending(1);
     $("iAuto").onchange = e => { R.autoAdvance = e.target.checked; };
+    $("iEvTgl").onclick = e => {
+      R.evOpen = !R.evOpen;
+      e.currentTarget.textContent = R.evOpen ? "Ocultar evidencia" : "Mostrar evidencia";
+      e.currentTarget.setAttribute("aria-expanded", String(R.evOpen));
+      renderEvidence();
+    };
+    renderNav();
     // las probabilidades pasan de las de la época anterior a las de esta
     morph("p", [...$("insp").querySelectorAll(".pbar .fi")], i);
     // decisión recién tomada: anillo verde (confirmada) o morado (corregida) donde se ve esa época
@@ -504,26 +590,51 @@
     renderEvidence();
   }
 
-  /* ── evidencia espectral (US-11): sola en las marcadas; a pedido en las demás ── */
+  /* ── navegación bajo el visor: anterior/siguiente, deslizador e «Ir a la época» (US-05) ── */
+  const scrubLabel = i => {
+    const t = clockOf(i);
+    return `Época ${fmtInt(i + 1)} de ${fmtInt(R.d.night.n_epochs)}${t != null ? " · " + clockHMS(t) : ""}`;
+  };
+  function renderNav() {
+    const n = R.d.night.n_epochs, i = R.sel, sl = $("epSlider");
+    $("iPrev").disabled = i === 0;
+    $("iNext").disabled = i === n - 1;
+    sl.max = n;
+    sl.value = i + 1;
+    $("epSliderOut").textContent = scrubLabel(i);
+    $("epGotoIn").max = n;
+  }
+
+  function gotoEpoch(e) {
+    e.preventDefault();
+    if (!R.d) return;
+    const n = R.d.night.n_epochs, raw = $("epGotoIn").value.trim(), v = Number(raw);
+    const bad = !raw || !Number.isInteger(v) || v < 1 || v > n;
+    $("epGotoIn").setAttribute("aria-invalid", String(bad));
+    $("epGotoErr").textContent = bad ? `Esta noche tiene ${fmtInt(n)} épocas: escriba un número del 1 al ${fmtInt(n)}.` : "";
+    if (!bad) select(v - 1);
+  }
+
+  /* ── evidencia espectral (US-11): visible en todas las épocas, se puede ocultar ── */
   function renderEvidence() {
     const el = $("iEvid"), i = R.sel, d = R.d;
     if (!el) return;
-    if (!d.epochs.review[i] && !R.evShow.has(i)) {
-      el.innerHTML = '<button class="ghost" id="iEvBtn" style="width:100%">Mostrar evidencia de la señal</button>';
-      $("iEvBtn").onclick = () => { R.evShow.add(i); renderEvidence(); };
+    el.classList.remove("loading");
+    el.removeAttribute("aria-busy");
+    if (!R.evOpen) {
+      clearTimeout(R.evTimer);
+      el.innerHTML = '<p class="evoff">Oculta. Con «Mostrar evidencia» vuelve a ver cómo se reparte la potencia del EEG por bandas en esta época.</p>';
       return;
     }
     const key = `${i}|${R.evChannel || ""}`;
     const ev = R.ev.get(key);
     if (!ev) {
-      el.innerHTML = '<div class="mini" style="margin:0"><span class="spin"></span>Calculando la potencia por bandas…</div>';
-      MaiaAPI.getEvidence(d.id, i, R.evChannel).then(out => {
-        R.ev.set(key, out);
-        if (R.d && R.d.id === d.id && R.sel === i) renderEvidence();
-      }).catch(e => {
-        R.ev.set(key, { error: e.message || "No se pudo calcular la evidencia." });
-        if (R.sel === i) renderEvidence();
-      });
+      // mientras llega, queda la evidencia anterior atenuada (la tarjeta no cambia de alto)
+      el.innerHTML = R.evLast || '<div class="evskel"><span class="spin"></span>Calculando la potencia por bandas…</div>';
+      el.classList.add("loading");
+      el.setAttribute("aria-busy", "true");
+      clearTimeout(R.evTimer);
+      R.evTimer = setTimeout(() => fetchEvidence(d, i, key), 120);   // al recorrer épocas rápido, solo se pide la última
       return;
     }
     if (ev.error) { el.innerHTML = `<div class="mini" style="margin:0;color:var(--crit)">${esc(ev.error)}</div>`; return; }
@@ -549,10 +660,25 @@
       ${rows}
       <div class="evleg"><span><i style="background:var(--ink2);opacity:.75"></i>esta época</span>${typ.map((t, k) => t
         ? `<span><i class="c${k + 1}" style="width:4px"></i>${cands[k]} típica, ${k + 1}.ª opción (${t.n} épocas)</span>` : "").join("")}</div>
-      <div class="evhint">${hint}</div>
-      <div class="mini" style="margin-top:6px">Cada fila tiene su propia escala. ${esc(ev.method)}</div></div>`;
+      <div class="igap"></div>
+      <div class="ifoot"><div class="evhint">${hint}</div>
+        <div class="mini" style="margin-top:6px">Cada fila tiene su propia escala. ${esc(ev.method)}</div></div></div>`;
+    R.evLast = el.innerHTML;
     morph("band", [...el.querySelectorAll(".band .bt .fi")], `${i}|${ev.channel}`);
     if ($("iEvCh")) $("iEvCh").onchange = e => { R.evChannel = e.target.value; renderEvidence(); };
+  }
+
+  function fetchEvidence(d, i, key) {
+    if (!R.d || R.d.id !== d.id || R.sel !== i || !R.evOpen || R.ev.has(key) || R.evBusy.has(key)) return;
+    const gen = R.evGen;
+    R.evBusy.add(key);
+    MaiaAPI.getEvidence(d.id, i, R.evChannel)
+      .then(out => { if (gen === R.evGen) R.ev.set(key, out); })
+      .catch(e => { if (gen === R.evGen) R.ev.set(key, { error: e.message || "No se pudo calcular la evidencia." }); })
+      .finally(() => {
+        R.evBusy.delete(key);
+        if (R.d && R.d.id === d.id && R.sel === i) renderEvidence();
+      });
   }
 
   /* ── cola de épocas ── */
@@ -826,10 +952,17 @@
   /* ══════════════ navegación y decisiones ══════════════ */
   function select(i) {
     if (!R.d) return;
-    R.sel = Math.max(0, Math.min(R.d.night.n_epochs - 1, i));
+    const n = R.d.night.n_epochs;
+    R.sel = Math.max(0, Math.min(n - 1, i));
+    const z = R.hypZoom;
+    if (z && (R.sel < z[0] || R.sel >= z[1])) {        // fuera del tramo acercado: el tramo se corre hasta ella
+      const w = z[1] - z[0], a = Math.max(0, Math.min(n - w, R.sel + 0.5 - w / 2));
+      R.hypZoom = [a, a + w];
+    }
     V.epoch = R.sel;
     renderInspector();
     renderHypno();
+    renderZoom({ hyp: false });
     markQueueSelection();
     renderViewerSoon();
   }
@@ -844,6 +977,7 @@
   }
 
   function jumpPending(dir) {
+    if (!R.d) return;
     const i = nextPending(R.sel, dir);
     if (i == null) UI.toast(dir > 0 ? "No hay más épocas pendientes hacia adelante." : "No hay épocas pendientes antes de esta.");
     else select(i);
@@ -862,6 +996,7 @@
     ep.final[i] = stage === null ? pred : stage;
     R.flash = stage === null ? null : { epoch: i, kind: stage === pred ? "ok" : "corr", t0: FX.now() };
     R.ev.clear();                                   // los perfiles típicos dependen del hipnograma final
+    R.evGen++;
     const p = push(i, stage);
     afterLocalChange();
     if (stage !== null && adv && R.autoAdvance) advance(wasFlagged);
@@ -940,22 +1075,28 @@
     $("finConf").textContent = fmtInt(s.confirmed);
     $("finCorr").textContent = fmtInt(s.corrected);
     $("finPend").textContent = fmtInt(s.pending);
-    $("finBody").innerHTML = s.changes.length
-      ? `<div class="finlist"><table><thead><tr><th class="l">Época</th><th class="l">Hora</th><th class="l">Modelo</th>
-          <th class="l">Su estadio</th><th></th></tr></thead><tbody>${s.changes.map(c => `<tr>
+    // todas las decisiones (confirmadas y corregidas); una API anterior solo manda las corregidas
+    const list = s.decisions || s.changes.map(c => ({ ...c, kind: "corrected" }));
+    $("finBody").innerHTML = list.length
+      ? `<div class="finlist"><table><thead><tr><th class="l">Época</th><th class="l">Hora</th><th class="l">Decisión</th>
+          <th class="l">Modelo</th><th class="l">Su estadio</th><th></th></tr></thead><tbody>${list.map(c => `<tr>
           <td class="l">${c.epoch + 1}${c.flagged ? ' <span class="mini" style="margin:0">marcada</span>' : ""}</td>
           <td class="l">${c.clock_s != null ? clockHMS(c.clock_s) : "—"}</td>
+          <td class="l">${c.kind === "confirmed" ? '<span class="pill ok">✓ Confirmada</span>' : '<span class="pill c">Corregida</span>'}</td>
           <td class="l">${UI.stage(c.model_stage)}</td><td class="l">${UI.stage(c.reviewer_stage)}</td>
-          <td><button class="ghost" data-undo="${c.epoch}" title="Devolver la época ${c.epoch + 1} al estadio del modelo">↺ Deshacer</button></td>
+          <td><button class="ghost" data-undo="${c.epoch}" data-kind="${c.kind}" data-flagged="${c.flagged ? 1 : 0}"
+            title="${c.kind === "confirmed" ? `Quitar la confirmación de la época ${c.epoch + 1}` : `Devolver la época ${c.epoch + 1} al estadio del modelo`}">↺ Deshacer</button></td>
           </tr>`).join("")}</tbody></table></div>`
-      : '<p class="mtext" style="margin:14px 0 0">No cambió ningún estadio del modelo.</p>';
+      : '<p class="mtext" style="margin:14px 0 0">Todavía no confirmó ni corrigió ninguna época: el hipnograma final es el del modelo.</p>';
     $("finText").innerHTML = (s.pending ? `Quedan <b>${s.pending}</b> épocas marcadas sin revisar: el hipnograma final las toma ` +
       "tal como las predijo el modelo. " : "") + "La revisión quedará finalizada con su nombre y se puede reabrir.";
     $("finBody").querySelectorAll("[data-undo]").forEach(b => b.onclick = async () => {
       const e = +b.dataset.undo, model = R.d.epochs.stage[e];
       b.disabled = true;
       await setStage(null, e, { advance: false });
-      UI.toast(`Época ${e + 1} devuelta al estadio del modelo (${STG[model].k}).`);
+      UI.toast(b.dataset.kind === "confirmed"
+        ? `Época ${e + 1}: se quitó la confirmación${b.dataset.flagged === "1" ? "; vuelve a quedar pendiente" : ""}.`
+        : `Época ${e + 1} devuelta al estadio del modelo (${STG[model].k}).`);
       openFinalize();
     });
   }
@@ -1006,10 +1147,30 @@
       fn(b);
     };
   };
-  chipset("hypView", b => { R.view = b.dataset.v; renderHypno(); });
+  chipset("hypView", b => {
+    R.view = b.dataset.v;
+    R.hypNote = !!R.d && localReview().corrected === 0;   // sin correcciones las dos vistas son iguales: se dice
+    renderHypno();
+    if (R.hypNote) FX.pop($("hypNote"));
+  });
   chipset("cmView", b => { R.cmView = b.dataset.v; renderAgreement(); });
   chipset("qFilt", b => { R.qFilt = b.dataset.f; renderQueue(); });
-  chipset("sigWin", b => { V.win = +b.dataset.w; V.render(); renderHypno(); });
+  chipset("sigWin", b => { V.win = +b.dataset.w; V.zoom = null; V.render(); renderZoom(); });
+  $("zoomReset").onclick = () => V.setZoom(null);
+  $("zoomPlus").onclick = () => R.d && V.zoomStep(1);
+  $("zoomMinus").onclick = () => R.d && V.zoomStep(-1);
+  $("panL").onclick = () => R.d && V.pan(-1);
+  $("panR").onclick = () => R.d && V.pan(1);
+  $("hypReset").onclick = () => setHypZoom(null);
+  $("iPrev").onclick = () => select(R.sel - 1);
+  $("iNext").onclick = () => select(R.sel + 1);
+  $("iPrevF").onclick = () => jumpPending(-1);
+  $("iNextF").onclick = () => jumpPending(1);
+  // deslizador: mientras se arrastra solo cambia la etiqueta; al soltar se abre esa época
+  $("epSlider").addEventListener("input", e => { if (R.d) $("epSliderOut").textContent = scrubLabel(+e.target.value - 1); });
+  $("epSlider").addEventListener("change", e => { if (R.d) select(+e.target.value - 1); });
+  $("epGoto").addEventListener("submit", gotoEpoch);
+  $("epGotoIn").addEventListener("input", () => { $("epGotoErr").textContent = ""; $("epGotoIn").removeAttribute("aria-invalid"); });
   $("viewTabs").onclick = e => { const b = e.target.closest("button[data-tab]"); if (b) setTab(b.dataset.tab); };
   // leyenda del hipnograma → resaltar ese estadio o estado (el hipnograma lee data-focus de su contenedor)
   const hypFocus = v => { if (v) $("c-hypno").dataset.focus = v; else delete $("c-hypno").dataset.focus; };
@@ -1023,7 +1184,10 @@
     const b = e.target.closest("button");
     if (!b) return;
     const s = b.dataset.s, on = V.channels.includes(s);
-    if (on && V.channels.length === 1) return;          // siempre queda al menos un trazo
+    if (on && V.channels.length === 1) {                // siempre queda al menos un trazo
+      UI.toast("Debe quedar al menos un canal a la vista.");
+      return;
+    }
     V.channels = on ? V.channels.filter(c => c !== s)
       : Object.keys(R.d.channels.available).filter(c => c === s || V.channels.includes(c));
     renderChannelToggles();
@@ -1069,6 +1233,9 @@
     } else if (e.key === "Backspace" || e.key === "Delete") {
       e.preventDefault();
       setStage(null);
+    } else if (e.key === "Escape") {
+      if (V.zoom) V.setZoom(null);
+      else if (R.hypZoom) setHypZoom(null);
     }
   });
 

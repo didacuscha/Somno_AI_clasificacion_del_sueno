@@ -237,15 +237,22 @@ sintéticos. Sirve para mostrar la interfaz sin Python.
    |---|---|
    | `←` `→` | época anterior / siguiente |
    | `⇧` + `←` `→` | época marcada pendiente anterior / siguiente |
-   | `A` `B` | 1.ª / 2.ª opción del modelo |
+   | `A` / `Enter` | confirmar la 1.ª opción (el estadio del modelo) |
+   | `B` | corregir a la 2.ª opción |
    | `W` `1` `2` `3` `R` | asignar W, N1, N2, N3, REM (también `0` y `5`) |
-   | `Enter` | confirmar el estadio del modelo |
-   | `⌫` | volver al estadio del modelo |
+   | `⌫` | deshacer su decisión (la época vuelve al estadio del modelo) |
+   | `Esc` | quitar el zoom de la señal o del hipnograma |
 
    Al decidir, el visor salta a la siguiente época pendiente. Un clic en el hipnograma, en la señal
-   o en una época vecina lleva a esa época.
-5. **Finalizar revisión** muestra el resumen de cambios (se puede deshacer cualquiera) y firma con
-   su nombre; se puede reabrir. Agregue **notas** si hace falta.
+   o en una época vecina lleva a esa época; bajo el visor, el deslizador recorre la noche e
+   «Ir a la época» salta a un número. «Zoom +» (o arrastrar sobre la señal) acerca unos segundos de
+   la época; con zoom, ‹ y › recorren la época sin cambiar la escala, y «Zoom −» o «Restablecer zoom»
+   vuelven. «Amplitud ±» solo cambia la altura de las ondas: si los picos no caben, la fila crece en
+   vez de recortarlos. Arrastrar sobre el hipnograma acerca un tramo de la noche; doble clic vuelve.
+   Bajo el visor, el inspector muestra la época con sus vecinas y las probabilidades, las opciones del
+   modelo y la evidencia de la señal, que se ve siempre y se puede ocultar.
+5. **Finalizar revisión** muestra el resumen de sus decisiones, confirmadas y corregidas (se puede
+   deshacer cualquiera), y firma con su nombre; se puede reabrir. Agregue **notas** si hace falta.
 6. **Desempeño del modelo** (pestaña aparte) tiene el acuerdo con el hipnograma del experto.
 7. **Exportar** el hipnograma por época, o desde *Registros* todas las correcciones.
 

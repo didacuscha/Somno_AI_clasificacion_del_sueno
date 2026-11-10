@@ -608,11 +608,13 @@
       await delay(120);
       const rec = find(id), d = base(rec), ep = d.epochs, t0 = d.night.start_clock_s;
       const entries = Object.entries(rec.corrections).map(([e, c]) => [+e, c]).sort((a, b) => a[0] - b[0]);
-      const changes = entries.filter(([e, c]) => c.stage !== ep.stage[e]).map(([e, c]) => ({
-        epoch: e, clock_s: t0 != null ? t0 + e * EP : null, model_stage: ep.stage[e], reviewer_stage: c.stage,
-        flagged: !!ep.review[e], author: c.author, at: c.at }));
+      const decisions = entries.map(([e, c]) => ({
+        epoch: e, clock_s: t0 != null ? t0 + e * EP : null, kind: c.stage === ep.stage[e] ? "confirmed" : "corrected",
+        model_stage: ep.stage[e], reviewer_stage: c.stage, flagged: !!ep.review[e], author: c.author, at: c.at }));
+      const changes = decisions.filter(x => x.kind === "corrected").map(({ kind, ...x }) => x);
       return { confirmed: entries.length - changes.length, corrected: changes.length,
-               pending: ep.review.filter((f, i) => f && !(i in rec.corrections)).length, changes, review: dynamic(rec).review };
+               pending: ep.review.filter((f, i) => f && !(i in rec.corrections)).length, changes, decisions,
+               review: dynamic(rec).review };
     },
 
     async reviewAction(id, { action, expected_corrected }) {

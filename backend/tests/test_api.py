@@ -247,6 +247,15 @@ def test_revision_del_especialista(client, headers):
     assert s["confirmed"] >= 1 and s["corrected"] >= 1
     chg = next(x for x in s["changes"] if x["epoch"] == b)
     assert chg["model_stage"] == pred[b] and chg["reviewer_stage"] == second_b
+    # el resumen lista también las confirmadas, para poder deshacerlas desde ahí
+    kinds = {x["epoch"]: x["kind"] for x in s["decisions"]}
+    assert kinds[a] == "confirmed" and kinds[b] == "corrected"
+    assert len(s["decisions"]) == s["confirmed"] + s["corrected"]
+    out = client.patch(f"{API}/records/{rid}/epochs", headers=headers,
+                       json={"changes": [{"epoch": a, "stage": None}]}).json()
+    s2 = client.get(f"{API}/records/{rid}/changes", headers=headers).json()
+    assert s2["confirmed"] == s["confirmed"] - 1 and all(x["epoch"] != a for x in s2["decisions"])
+    client.patch(f"{API}/records/{rid}/epochs", headers=headers, json={"changes": [{"epoch": a, "stage": pred[a]}]})
     out = client.patch(f"{API}/records/{rid}/epochs", headers=headers,
                        json={"changes": [{"epoch": b, "stage": None}]}).json()
     assert out["final"][b] == pred[b] and out["history"][0]["old"] == config.STAGES[second_b]

@@ -70,6 +70,7 @@
   function go(v, { shared } = {}) {
     const apply = vt => {
       VIEWS.forEach(id => $(id).classList.toggle("hidden", id !== v));
+      document.body.dataset.view = v;                 // resultados usa el ancho de la pantalla (US-06)
       document.querySelectorAll("nav button").forEach(b =>
         b.setAttribute("aria-selected", String(b.dataset.v === v || (v === "vRes" && b.dataset.v === "vList"))));
       if (v !== "vRes") MaiaReview.stopPolling();
