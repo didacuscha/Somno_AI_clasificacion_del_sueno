@@ -218,8 +218,11 @@
      gráfico elige un tramo (onZoom([e0, e1])) y el doble clic vuelve a la noche completa
      (onZoom(null)); un clic sin arrastrar elige la época, como siempre. */
   let clipSeq = 0;
-  function dragZoom(s, capt, { W, H, L, pw, y, h, at, min, onZoom, onClick }) {
-    // arrastre horizontal → tramo [a, b] en las unidades de at(); un clic sin arrastre → onClick
+  function dragZoom(s, capt, { W, H, L, pw, y, h, at, min, onZoom, onClick, host, onDouble }) {
+    // arrastre horizontal → tramo [a, b] en las unidades de at(); un clic sin arrastre → onClick;
+    // dos clics seguidos en el mismo punto → onDouble. El doble clic se mide aquí y no con el evento
+    // dblclick: el primer clic elige la época y el gráfico se vuelve a dibujar, así que el navegador
+    // no lo dispara. El último clic se guarda en `host`, el contenedor, que no se reemplaza.
     let drag = null;
     const px = ev => svgPt(s, ev, W, H).x;
     capt.addEventListener("pointerdown", ev => {
@@ -243,7 +246,14 @@
       drag = null;
       if (!dr || ev.button !== 0) return;
       if (dr.rect) dr.rect.remove();
-      if (!dr.moved) return onClick && onClick(ev);
+      if (!dr.moved) {
+        const last = host && host._tap, t = ev.timeStamp;
+        const dbl = !!onDouble && !!last && t - last.t < 400 &&
+          Math.abs(ev.clientX - last.x) < 8 && Math.abs(ev.clientY - last.y) < 8;
+        if (host) host._tap = dbl ? null : { t, x: ev.clientX, y: ev.clientY };
+        return dbl ? onDouble() : onClick && onClick(ev);
+      }
+      if (host) host._tap = null;
       Tip.hide();
       const b = at(ev), lo = Math.min(dr.v, b), hi = Math.max(dr.v, b);
       if (hi - lo >= min) onZoom([lo, hi]);
@@ -428,13 +438,12 @@
     });
     capt.addEventListener("mouseleave", () => { xh.setAttribute("opacity", 0); Tip.hide(); });
     // arrastrar: acercar un tramo de al menos 4 épocas (2 min); clic: elegir la época
+    // doble clic con zoom: la noche completa
     dragZoom(s, capt, { W, H, L, pw, y: mainTop - 4, h: refTop + refH + 6 - mainTop, at: eAt, min: 4, onZoom,
-      onClick: ev => onSelect && onSelect(epochAt(ev)) });
+      onClick: ev => onSelect && onSelect(epochAt(ev)),
+      host: el, onDouble: zoom && onZoom ? () => onZoom(null) : null });
     s.appendChild(capt);
     el.replaceChildren(s);
-    // doble clic: la noche completa (el contenedor no se reemplaza, así que se escucha una sola vez)
-    el._onDbl = zoom && onZoom ? () => onZoom(null) : null;
-    if (!el._dbl) { el._dbl = true; el.addEventListener("dblclick", () => el._onDbl && el._onDbl()); }
   }
 
   /* ── Tiempo por estadio: modelo, final y referencia ── */
@@ -596,7 +605,6 @@
 
     init(el, d, opts) {
       Object.assign(this, { el, d, zoom: null }, opts);
-      if (!el._dbl) { el._dbl = true; el.addEventListener("dblclick", () => { if (this.el === el && this.zoom) this.setZoom(null); }); }
     },
 
     /* el zoom vale mientras la época elegida esté dentro del tramo acercado */
@@ -812,12 +820,14 @@
           "<br>Arrastre para acercar un tramo", ev);
       });
       capt.addEventListener("mouseleave", () => { xh.setAttribute("opacity", 0); Tip.hide(); });
-      // arrastrar: acercar al menos 2 s de señal; clic: elegir la época bajo el cursor
+      // arrastrar: acercar al menos 2 s de señal; clic: elegir la época bajo el cursor;
+      // doble clic con zoom: quitarlo
       dragZoom(s, capt, { W, H, L, pw, y: Tp, h: rowsH + TRK, at: tAt, min: 2, onZoom: z => this.setZoom(z),
         onClick: ev => {
           const e = Math.min(n - 1, Math.floor(tAt(ev) / EP));
           if (e !== this.epoch && this.onSelect) this.onSelect(e);
-        } });
+        },
+        host: this.el, onDouble: this.zoomed() ? () => this.setZoom(null) : null });
       s.appendChild(capt);
       const oldH = this.el.offsetHeight;
       this.el.replaceChildren(s);
