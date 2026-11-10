@@ -73,22 +73,26 @@ def state(epochs: dict, corrections: dict[int, int], finalized: dict, night_frac
 
 
 def changes(detail: dict, corrections: dict[int, dict]) -> dict:
-    """Resumen antes de finalizar: cuántas épocas confirmó y corrigió el revisor, y la
-    lista de correcciones (época, estadio del modelo, estadio del revisor)."""
+    """Resumen antes de finalizar: cuántas épocas confirmó y corrigió el revisor, la lista
+    de correcciones (`changes`) y la de todas sus decisiones, confirmadas y corregidas
+    (`decisions`, con `kind`), para poder deshacer cualquiera desde el resumen."""
     ep, night = detail["epochs"], detail["night"]
     pred = ep["stage"]
     t0 = night.get("start_clock_s")
-    corrected = [
+    decisions = [
         {"epoch": i, "clock_s": t0 + i * night["epoch_s"] if t0 is not None else None,
+         "kind": "confirmed" if c["stage"] == pred[i] else "corrected",
          "model_stage": pred[i], "reviewer_stage": c["stage"], "flagged": bool(ep["review"][i]),
          "author": c["author"], "at": c["at"]}
-        for i, c in sorted(corrections.items()) if c["stage"] != pred[i]]
+        for i, c in sorted(corrections.items())]
+    corrected = [{k: v for k, v in d.items() if k != "kind"} for d in decisions if d["kind"] == "corrected"]
     flagged = [i for i, f in enumerate(ep["review"]) if f]
     return {
-        "confirmed": sum(1 for i, c in corrections.items() if c["stage"] == pred[i]),
+        "confirmed": len(decisions) - len(corrected),
         "corrected": len(corrected),
         "pending": sum(1 for i in flagged if i not in corrections),
         "changes": corrected,
+        "decisions": decisions,
     }
 
 

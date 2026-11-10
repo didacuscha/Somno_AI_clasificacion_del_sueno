@@ -285,7 +285,11 @@ un revisor, según el hipnograma final).
 
 ### GET `/records/{id}/changes`
 Resumen antes de finalizar:
-`{ "confirmed": 12, "corrected": 3, "pending": 210, "changes": [ { "epoch": 64, "clock_s": 87420, "model_stage": 1, "reviewer_stage": 2, "flagged": true, "author": "…", "at": "…" } ], "review": {…} }`
+`{ "confirmed": 12, "corrected": 3, "pending": 210, "changes": [ { "epoch": 64, "clock_s": 87420, "model_stage": 1, "reviewer_stage": 2, "flagged": true, "author": "…", "at": "…" } ], "decisions": [ { "epoch": 59, "kind": "confirmed", … }, { "epoch": 64, "kind": "corrected", … } ], "review": {…} }`
+
+- `changes`: solo las correcciones (estadio distinto del modelo).
+- `decisions`: todas las decisiones del revisor, confirmadas y corregidas (`kind`), con los mismos campos;
+  el resumen las lista para poder deshacer cualquiera.
 
 ### POST `/records/{id}/review`
 `{ "action": "finalize", "expected_corrected": 3 }` finaliza la revisión con el nombre del usuario
