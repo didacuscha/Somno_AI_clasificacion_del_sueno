@@ -1156,16 +1156,20 @@
   chipset("cmView", b => { R.cmView = b.dataset.v; renderAgreement(); });
   chipset("qFilt", b => { R.qFilt = b.dataset.f; renderQueue(); });
   chipset("sigWin", b => { V.win = +b.dataset.w; V.zoom = null; V.render(); renderZoom(); });
-  $("zoomReset").onclick = () => V.setZoom(null);
-  $("zoomPlus").onclick = () => R.d && V.zoomStep(1);
-  $("zoomMinus").onclick = () => R.d && V.zoomStep(-1);
-  $("panL").onclick = () => R.d && V.pan(-1);
-  $("panR").onclick = () => R.d && V.pan(1);
-  $("hypReset").onclick = () => setHypZoom(null);
-  $("iPrev").onclick = () => select(R.sel - 1);
-  $("iNext").onclick = () => select(R.sel + 1);
-  $("iPrevF").onclick = () => jumpPending(-1);
-  $("iNextF").onclick = () => jumpPending(1);
+  // botones fijos del visor: tras un clic con el mouse sueltan el foco, para que Enter siga
+  // confirmando la época y no vuelva a pulsar el botón (con «Pendiente »» saltaría la época sin
+  // confirmarla). Con el teclado (Tab + Enter, detail 0) el foco se queda para poder repetir.
+  const onTap = (id, fn) => { $(id).onclick = e => { if (e.detail) e.currentTarget.blur(); fn(); }; };
+  onTap("zoomReset", () => V.setZoom(null));
+  onTap("zoomPlus", () => R.d && V.zoomStep(1));
+  onTap("zoomMinus", () => R.d && V.zoomStep(-1));
+  onTap("panL", () => R.d && V.pan(-1));
+  onTap("panR", () => R.d && V.pan(1));
+  onTap("hypReset", () => setHypZoom(null));
+  onTap("iPrev", () => select(R.sel - 1));
+  onTap("iNext", () => select(R.sel + 1));
+  onTap("iPrevF", () => jumpPending(-1));
+  onTap("iNextF", () => jumpPending(1));
   // deslizador: mientras se arrastra solo cambia la etiqueta; al soltar se abre esa época
   $("epSlider").addEventListener("input", e => { if (R.d) $("epSliderOut").textContent = scrubLabel(+e.target.value - 1); });
   $("epSlider").addEventListener("change", e => { if (R.d) select(+e.target.value - 1); });
