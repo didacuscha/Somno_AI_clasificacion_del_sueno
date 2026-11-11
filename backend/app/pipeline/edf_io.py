@@ -86,7 +86,8 @@ def parse_header(raw: bytes, file_size: int | None = None) -> dict:
 
     col = lambda off, width: [_field(sig[off + i * width: off + (i + 1) * width]) for i in range(ns)]  # noqa: E731
     labels = col(0, 16)
-    units = col(ns * 96, 8)
+    # la unidad en latin-1, como la lee MNE: «µV» no pierde la µ (en ASCII quedaría «V»)
+    units = [sig[ns * 96 + i * 8: ns * 96 + (i + 1) * 8].decode("latin-1").strip() for i in range(ns)]
     try:
         spr = [int(float(v or 0)) for v in col(ns * 216, 8)]      # muestras por registro de datos
     except ValueError as e:

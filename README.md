@@ -44,7 +44,7 @@ Marín Gallón · Juan Camilo Martínez Vélez · Juan Sebastián Casas Castillo
   (acuerdo con la referencia, F1 macro, kappa, matriz de confusión) va aparte, en «Desempeño del
   modelo». Cada término técnico tiene una explicación en lenguaje llano (ⓘ).
 - No entrega diagnósticos ni recomendaciones clínicas, y lo dice en cada resultado.
-- Exporta el hipnograma por época y **todas las correcciones** en CSV: el insumo para medir
+- Exporta la **clasificación por época** en Excel y **todas las correcciones** en CSV: el insumo para medir
   el modelo en uso y reentrenarlo.
 
 ## Cómo funciona
@@ -230,8 +230,10 @@ sintéticos. Sirve para mostrar la interfaz sin Python.
    modelo». Mire el desempeño esperado de la combinación.
 3. Elija la **ventana** y confirme el **apagado de luces** → *Analizar*. El diálogo muestra cada
    paso; al terminar, *Ver resultados*.
-4. En **Resultados** (vista clínica), el hipnograma muestra en naranja las épocas para revisar. En
-   **Revisión época a época**:
+4. En **Resultados** (vista clínica), el hipnograma muestra en naranja las épocas para revisar.
+   Arriba, junto al estado de la noche, **Iniciar revisión** abre la revisión (hasta entonces las
+   opciones del modelo están bloqueadas). Cada decisión se **guarda al instante** en el servidor: se
+   puede salir, recargar o seguir desde otro computador sin finalizar. En **Revisión época a época**:
 
    | Tecla | Acción |
    |---|---|
@@ -248,13 +250,17 @@ sintéticos. Sirve para mostrar la interfaz sin Python.
    «Ir a la época» salta a un número. «Zoom +» (o arrastrar sobre la señal) acerca unos segundos de
    la época; con zoom, ‹ y › recorren la época sin cambiar la escala, y «Zoom −» o «Restablecer zoom»
    vuelven. «Amplitud ±» solo cambia la altura de las ondas: si los picos no caben, la fila crece en
-   vez de recortarlos. Arrastrar sobre el hipnograma acerca un tramo de la noche; doble clic vuelve.
+   vez de recortarlos. El eje del tiempo va en segundos desde el inicio de la época elegida y cada
+   canal muestra su amplitud en la unidad de su encabezado EDF (µV en Sleep-EDF).
+   Arrastrar sobre el hipnograma acerca un tramo de la noche; doble clic vuelve.
    Bajo el visor, el inspector muestra la época con sus vecinas y las probabilidades, las opciones del
    modelo y la evidencia de la señal, que se ve siempre y se puede ocultar.
-5. **Finalizar revisión** muestra el resumen de sus decisiones, confirmadas y corregidas (se puede
-   deshacer cualquiera), y firma con su nombre; se puede reabrir. Agregue **notas** si hace falta.
+5. **Finalizar revisión** (en el mismo lugar de arriba) muestra el resumen de sus decisiones,
+   confirmadas y corregidas (se puede deshacer cualquiera), y firma con su nombre; **Reabrir revisión**
+   la vuelve a abrir. Agregue **notas** si hace falta.
 6. **Desempeño del modelo** (pestaña aparte) tiene el acuerdo con el hipnograma del experto.
-7. **Exportar** el hipnograma por época, o desde *Registros* todas las correcciones.
+7. **Exportar clasificación por época (Excel)**: por época, la predicción del modelo, la confianza,
+   las probabilidades y el resultado de la revisión. Desde *Registros*, todas las correcciones (CSV).
 
 ## Pruebas e integración continua
 

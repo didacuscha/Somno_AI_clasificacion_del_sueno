@@ -304,7 +304,8 @@ def _run(job: Job, summary: dict):
             model_epochs = {s: epochs.split(*raw[lab], n, EP) for s, lab in job.selected.items()}
             viewer, sfreq = edf_io.to_common_rate({s: raw[lab] for s, lab in available.items()})
             signals.remove(tmp_dir)
-            signals.save(tmp_dir, viewer, sfreq)
+            units = {s: (h.get("units") or {}).get(lab, signals.DEFAULT_UNIT) for s, lab in available.items()}
+            signals.save(tmp_dir, viewer, sfreq, units)
             steps.done("preprocess", f"{n} épocas de {EP} s")
 
         # 3 · predecir con el adaptador (lo único que el pipeline sabe del modelo)
@@ -346,6 +347,7 @@ def _run(job: Job, summary: dict):
                     "file_labels": h["labels"],
                     "unused": channels.inspect(h["labels"])["unused"],
                     "fs": {s: h["fs"].get(lab, 0.0) for s, lab in available.items()},
+                    "units": {s: signals.display_unit(u)[0] for s, u in units.items()},
                 },
                 "model": {**info.public(), "notes": res.notes,
                           "expected": {**expected, "below_goal": expected.get("test_mf1", 1) < config.MF1_GOAL,
