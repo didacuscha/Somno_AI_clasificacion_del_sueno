@@ -401,7 +401,7 @@
     const d = R.d, rv = localReview(), c = rv.corrected, z = R.hypZoom;
     const viewTxt = R.view === "predicted"
       ? (c ? `Mostrando solo el modelo, sin ${c === 1 ? "la corrección" : `las ${c} correcciones`} del revisor. ` : "Mostrando solo el modelo. ")
-      : (c ? `Mostrando el hipnograma final: el modelo con ${c} corrección${c === 1 ? "" : "es"} del revisor. ` : "");
+      : (c ? `Mostrando el hipnograma final: el modelo con ${c} ${c === 1 ? "corrección" : "correcciones"} del revisor. ` : "");
     let zoomTxt = "Haga clic en cualquier momento de la noche para revisar esa época, o arrastre para acercar un tramo.";
     if (z) {
       const a = clockOf(z[0]), b = clockOf(z[1]), len = fmtHM((z[1] - z[0]) * d.night.epoch_s);

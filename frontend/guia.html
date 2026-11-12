@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guía de uso · SomnoAI</title>
+<meta name="description" content="Cómo revisar y corregir la estadificación del sueño en SomnoAI: guía para especialistas y técnicos.">
+<link rel="icon" href="data:,">
+<script>/* el mismo tema que la aplicación (claro u oscuro), antes del primer pintado */
+try{var _t=localStorage.getItem("maia_theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+document.documentElement.dataset.theme=_t}catch(e){}</script>
+<style>
+/* Guía de uso de SomnoAI. Misma paleta que el tablero (index.html). El PDF se genera desde esta
+   misma página con docs/guia/generar_pdf.sh: los estilos de impresión están al final. */
+:root{
+  color-scheme: light;
+  --page:#f5f5f2; --surface-1:#fcfcfb; --surface-2:#f0efec; --surface-3:#e7e6e1;
+  --ink:#0b0b0b; --ink2:#52514e; --muted:#6b6860;
+  --border:rgba(11,11,11,0.11); --s1:#2a78d6; --cta:#1f6bc9; --link:#1f63b8;
+  --good:#0ca30c; --warn:#fab219; --crit:#d03b3b; --corr:#7c4fd6;
+  --ok-text:#006300; --warn-text:#8a5c00; --corr-text:#5b34b0;
+  --note-bg:color-mix(in srgb,var(--s1) 7%,var(--surface-1)); --note-bd:color-mix(in srgb,var(--s1) 30%,transparent);
+  --warn-bg:color-mix(in srgb,var(--warn) 12%,var(--surface-1)); --warn-bd:color-mix(in srgb,var(--warn) 50%,transparent);
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --page:#0d0d0d; --surface-1:#1a1a19; --surface-2:#232322; --surface-3:#2c2c2a;
+  --ink:#ffffff; --ink2:#cfcec6; --muted:#a3a19a;
+  --border:rgba(255,255,255,.15); --s1:#3987e5; --link:#6aa8f0; --corr:#9b7bf0;
+  --ok-text:#0ca30c; --warn-text:#fab219; --corr-text:#b9a2f5;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:64px}
+body{margin:0;background:var(--page);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--link)}
+h1,h2,h3,h4{margin:0;font-weight:650;letter-spacing:-0.015em;line-height:1.25}
+p{margin:0 0 12px}
+ul,ol{margin:0 0 12px;padding-left:22px}
+li{margin:3px 0}
+b,strong{font-weight:620}
+:focus-visible{outline:2px solid var(--s1);outline-offset:2px;border-radius:5px}
+
+/* ── barra superior ── */
+.gbar{position:sticky;top:0;z-index:20;background:var(--surface-1);border-bottom:1px solid var(--border)}
+.gbar .in{max-width:1180px;margin:0 auto;padding:9px 18px;display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+.gbar img{width:22px;height:26px;flex:none}
+.gbar .t{font-weight:650;font-size:15px;letter-spacing:-0.02em}
+.gbar .t span{color:var(--muted);font-weight:500}
+.grow{flex:1}
+.btn{display:inline-flex;align-items:center;gap:6px;border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;
+  text-decoration:none;white-space:nowrap;cursor:pointer;border:1px solid var(--border);background:var(--surface-2);color:var(--ink2)}
+.btn:hover{background:var(--surface-3);color:var(--ink)}
+.btn.cta{background:var(--cta);border-color:var(--cta);color:#fff;font-weight:600}
+.btn.cta:hover{filter:brightness(1.08)}
+.btn svg{width:14px;height:14px;flex:none}
+
+/* ── estructura: índice al lado en pantallas anchas, arriba en las angostas ── */
+.layout{max-width:1180px;margin:0 auto;padding:0 18px 80px;display:grid;gap:36px}
+@media(min-width:1060px){
+  .layout{grid-template-columns:230px minmax(0,1fr)}
+  .toc{position:sticky;top:64px;align-self:start;max-height:calc(100vh - 80px);overflow:auto;padding-top:30px}
+}
+main{min-width:0;max-width:860px}
+.toc h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
+.toc ol{list-style:none;padding:0;margin:0;display:grid;gap:1px}
+.toc a{display:block;padding:4px 9px;border-radius:7px;color:var(--ink2);text-decoration:none;font-size:13.5px;line-height:1.4}
+.toc a:hover{background:var(--surface-2);color:var(--ink)}
+.toc a.on{background:var(--surface-2);color:var(--ink);font-weight:600}
+.toc .n{color:var(--muted);display:inline-block;min-width:20px}
+@media(max-width:1059px){
+  .toc{margin-top:22px;padding:14px 16px;border:1px solid var(--border);border-radius:12px;background:var(--surface-1)}
+  .toc ol{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+}
+
+/* ── portada y secciones ── */
+.cover{padding:34px 0 6px}
+.cover .kick{font-size:12.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
+.cover h1{font-size:30px;margin:6px 0 8px}
+.cover .lead{font-size:16.5px;color:var(--ink2);max-width:640px;margin:0}
+.cover .meta{font-size:13px;color:var(--muted);margin-top:10px}
+section{padding-top:40px}
+section > h2{font-size:23px;margin-bottom:12px;display:flex;align-items:baseline;gap:10px}
+section > h2 .n{color:var(--s1);font-variant-numeric:tabular-nums}
+h3{font-size:17.5px;margin:30px 0 9px}
+h4{font-size:15px;margin:20px 0 6px}
+.muted{color:var(--muted)}
+.small{font-size:13.5px}
+
+/* ── avisos ── */
+.note,.warn{border-radius:11px;padding:12px 15px;margin:14px 0;font-size:14.5px}
+.note{background:var(--note-bg);border:1px solid var(--note-bd)}
+.warn{background:var(--warn-bg);border:1px solid var(--warn-bd)}
+.note > :last-child,.warn > :last-child{margin-bottom:0}
+.note b.h,.warn b.h{display:block;margin-bottom:3px}
+
+/* ── capturas con marcadores numerados ── */
+figure.shot{margin:16px 0 8px}
+figure.shot a{display:block}
+figure.shot img{display:block;width:100%;height:auto;border-radius:10px;border:1px solid var(--border);background:#f5f5f2}
+figure.shot.narrow{max-width:400px}
+figure.shot.mid{max-width:560px}
+figure.shot figcaption{font-size:13px;color:var(--muted);margin-top:7px}
+ol.marks{list-style:none;padding:0;margin:12px 0 16px;counter-reset:m}
+ol.marks > li{counter-increment:m;position:relative;padding-left:36px;margin:8px 0}
+ol.marks > li::before{content:counter(m);position:absolute;left:0;top:0;width:24px;height:24px;border-radius:50%;
+  background:#111;color:#fff;font-size:13px;font-weight:700;line-height:24px;text-align:center;
+  box-shadow:0 0 0 1.5px var(--surface-1),0 0 0 2.5px #111}
+:root[data-theme="dark"] ol.marks > li::before{background:#fff;color:#111;box-shadow:none}
+.m{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#111;color:#fff;
+  font-size:11.5px;font-weight:700;vertical-align:1px}
+:root[data-theme="dark"] .m{background:#fff;color:#111}
+
+/* ── tablas, teclas y colores ── */
+table{width:100%;border-collapse:collapse;font-size:14px;margin:10px 0 16px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+.tw{overflow-x:auto}
+kbd{display:inline-block;min-width:22px;padding:1px 6px;border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;
+  background:var(--surface-1);font:600 12.5px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:center;color:var(--ink)}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--c);vertical-align:-1px;margin-right:5px}
+.pill{display:inline-flex;align-items:center;font-size:12.5px;padding:1px 9px;border-radius:999px;border:1px solid var(--border);
+  white-space:nowrap;color:var(--ink2);background:var(--surface-2)}
+.pill.w{border-color:color-mix(in srgb,var(--warn) 60%,transparent);color:var(--warn-text)}
+.pill.x{border-color:color-mix(in srgb,var(--crit) 45%,transparent);color:var(--crit)}
+.pill.r{border-color:color-mix(in srgb,var(--s1) 45%,transparent);color:var(--s1)}
+.pill.ok{border-color:color-mix(in srgb,var(--good) 45%,transparent);color:var(--ok-text)}
+.pill.c{border-color:color-mix(in srgb,var(--corr) 50%,transparent);color:var(--corr-text)}
+.pill.auto{background:color-mix(in srgb,var(--good) 12%,var(--surface-1));border-color:color-mix(in srgb,var(--good) 40%,transparent);color:var(--ok-text)}
+dl.gl{margin:8px 0 0}
+dl.gl dt{font-weight:620;margin-top:12px}
+dl.gl dd{margin:2px 0 0;color:var(--ink2)}
+
+/* ── referencia rápida ── */
+.quick{margin-top:22px;border:1px solid var(--border);border-radius:14px;background:var(--surface-1);padding:20px 22px}
+.quick > h2{font-size:20px;margin-bottom:4px}
+.quick .grid{display:grid;gap:18px 30px;margin-top:14px}
+@media(min-width:760px){ .quick .grid{grid-template-columns:1fr 1fr} }
+.quick h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 7px}
+.quick ol.flow{padding-left:20px;margin:0}
+.quick ol.flow li{margin:4px 0}
+.quick table{margin:0;font-size:13.5px}
+.quick td{padding:4px 8px 4px 0;border:0}
+.quick td:first-child{white-space:nowrap;width:1%}
+.quick ul{padding-left:18px;margin:0}
+.quick .colors{display:grid;gap:5px;font-size:13.5px}
+.quick .colors div{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
+.quick .colors .k{color:var(--muted);min-width:70px}
+
+/* ── preguntas frecuentes ── */
+.faq h4{margin-top:22px}
+.foot{margin-top:46px;padding-top:16px;border-top:1px solid var(--border);font-size:13px;color:var(--muted)}
+
+/* ═════════ impresión / PDF (carta) ═════════ */
+@page{size:letter;margin:15mm 15mm 17mm;
+  @bottom-left{content:"SomnoAI · Guía de uso";font:8.5pt system-ui,-apple-system,sans-serif;color:#6b6860}
+  @bottom-right{content:"Página " counter(page) " de " counter(pages);font:8.5pt system-ui,-apple-system,sans-serif;color:#6b6860}}
+@media print{
+  :root,:root[data-theme="dark"]{color-scheme:light;
+    --page:#fff; --surface-1:#fff; --surface-2:#f0efec; --surface-3:#e7e6e1; --ink:#0b0b0b; --ink2:#3d3c39; --muted:#6b6860;
+    --border:rgba(11,11,11,0.16); --s1:#2a78d6; --link:#1f63b8; --corr:#7c4fd6; --ok-text:#006300; --warn-text:#8a5c00; --corr-text:#5b34b0}
+  :root[data-theme="dark"] ol.marks > li::before{background:#111;color:#fff;box-shadow:0 0 0 1.5px #fff,0 0 0 2.5px #111}
+  :root[data-theme="dark"] .m{background:#111;color:#fff}
+  body{font-size:10.5pt;line-height:1.5;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .gbar,.toc,.noprint{display:none!important}
+  .layout{display:block;padding:0;max-width:none}
+  main{max-width:none}
+  a{color:inherit;text-decoration:none}
+  /* página 1: portada compacta + referencia rápida */
+  .cover{padding:0}
+  .cover .kick{font-size:8pt}
+  .cover h1{font-size:18pt;margin:3px 0 5px}
+  .cover .lead{font-size:11pt}
+  .cover .meta{font-size:8.5pt;margin-top:5px}
+  .quick{margin-top:10px;padding:10px 14px;break-inside:avoid}
+  .quick > h2{font-size:14pt}
+  .quick .grid{grid-template-columns:1fr 1fr;gap:10px 20px;margin-top:6px}
+  .quick h3{font-size:8pt;margin-bottom:4px}
+  .quick table,.quick .colors,.quick li,.quick p{font-size:9pt;line-height:1.4}
+  .quick td{padding:2px 6px 2px 0}
+  .quick kbd{font-size:8pt;padding:0 4px;min-width:16px}
+  /* el resto corre seguido: las secciones no fuerzan página nueva */
+  section{padding-top:16pt}
+  #antes{break-before:page}
+  section > h2{font-size:16pt;break-after:avoid}
+  h3{font-size:12.5pt;margin-top:14pt;break-after:avoid}
+  h4{break-after:avoid}
+  figure.shot{break-inside:avoid;break-after:avoid;margin:8pt 0 4pt}
+  figure.shot img{width:auto;max-width:100%;max-height:115mm;margin:0 auto}
+  figure.shot.narrow img{max-height:75mm;margin:0}
+  figure.shot.mid img{max-height:85mm;margin:0}
+  ol.marks > li{break-inside:avoid}
+  table,.note,.warn{break-inside:avoid}
+  .faq > div{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<header class="gbar">
+  <div class="in">
+    <img src="assets/uniandes.svg" alt="" width="22" height="26">
+    <div class="t">SomnoAI <span>· Guía de uso</span></div>
+    <span class="grow"></span>
+    <a class="btn" id="btnApp" href="./" title="Ir a la aplicación">Ir a SomnoAI</a>
+    <a class="btn cta" href="guia/SomnoAI_guia_de_uso.pdf" download="SomnoAI_guia_de_uso.pdf"
+      title="Descargar esta guía en PDF para tenerla al lado o imprimirla">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5M5 19h14"/></svg>
+      Descargar PDF</a>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-label="Contenido de la guía">
+    <h2>Contenido</h2>
+    <ol>
+      <li><a href="#rapida"><span class="n">·</span>Referencia rápida</a></li>
+      <li><a href="#antes"><span class="n">1</span>Antes de empezar</a></li>
+      <li><a href="#registros"><span class="n">2</span>Registros</a></li>
+      <li><a href="#analizar"><span class="n">3</span>Analizar una noche</a></li>
+      <li><a href="#resultados"><span class="n">4</span>Leer los resultados</a></li>
+      <li><a href="#revision"><span class="n">5</span>Revisar época a época</a></li>
+      <li><a href="#finalizar"><span class="n">6</span>Finalizar, notas y bitácora</a></li>
+      <li><a href="#exportar"><span class="n">7</span>Exportar</a></li>
+      <li><a href="#problemas"><span class="n">8</span>Problemas frecuentes</a></li>
+      <li><a href="#glosario"><span class="n">9</span>Glosario</a></li>
+    </ol>
+  </nav>
+
+<main>
+  <div class="cover">
+    <div class="kick">SomnoAI · MAIA · Universidad de los Andes</div>
+    <h1>Guía de uso para la revisión de la estadificación del sueño</h1>
+    <p class="lead">Para especialistas y técnicos de sueño que confirman y corrigen, época por época, los estadios que propone el modelo.</p>
+    <div class="meta">Versión de noviembre de 2026 · SomnoAI v2 · Prototipo académico: no entrega diagnósticos ni recomendaciones clínicas.</div>
+  </div>
+
+  <!-- ══════════ REFERENCIA RÁPIDA ══════════ -->
+  <div class="quick" id="rapida">
+    <h2>Referencia rápida</h2>
+    <p class="muted small" style="margin:0">Lo esencial en una página, para tenerla al lado mientras revisa.</p>
+    <div class="grid">
+      <div>
+        <h3>El flujo</h3>
+        <ol class="flow">
+          <li>En <b>Registros</b>, abra una noche «Por revisar» (o analice una nueva en <b>Analizar nuevo</b>).</li>
+          <li>Pulse <b>Iniciar revisión</b>, arriba, junto al estado de la noche.</li>
+          <li>Recorra las <b>épocas marcadas</b>: confirme el estadio del modelo o corríjalo. El visor pasa solo a la siguiente pendiente.</li>
+          <li>Pulse <b>Finalizar revisión</b>: revise el resumen, deshaga lo que haga falta y finalice. La revisión queda con su nombre.</li>
+          <li>Si hace falta, agregue <b>notas</b> y <b>exporte</b> la clasificación por época (Excel).</li>
+        </ol>
+      </div>
+      <div>
+        <h3>Teclas en la revisión</h3>
+        <table>
+          <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Época anterior / siguiente</td></tr>
+          <tr><td><kbd>⇧</kbd> + <kbd>←</kbd> <kbd>→</kbd></td><td>Marcada pendiente anterior / siguiente</td></tr>
+          <tr><td><kbd>A</kbd> o <kbd>Enter</kbd></td><td>Confirmar la 1.ª opción (el estadio del modelo)</td></tr>
+          <tr><td><kbd>B</kbd></td><td>Corregir a la 2.ª opción</td></tr>
+          <tr><td><kbd>W</kbd> <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>R</kbd></td><td>Poner W, N1, N2, N3 o REM (también <kbd>0</kbd> = W y <kbd>5</kbd> = REM)</td></tr>
+          <tr><td><kbd>⌫</kbd></td><td>Deshacer su decisión en la época</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Quitar el zoom de la señal o del hipnograma</td></tr>
+        </table>
+        <p class="muted small" style="margin:6px 0 0">Funcionan con la revisión iniciada y fuera de los campos de texto.</p>
+      </div>
+      <div>
+        <h3>Colores</h3>
+        <div class="colors">
+          <div><span class="k">Estadios</span>
+            <span><i class="sw" style="--c:#86b6ef"></i>W</span><span><i class="sw" style="--c:#5598e7"></i>N1</span>
+            <span><i class="sw" style="--c:#2a78d6"></i>N2</span><span><i class="sw" style="--c:#184f95"></i>N3</span>
+            <span><i class="sw" style="--c:#eb6834"></i>REM</span></div>
+          <div><span class="k">Épocas</span>
+            <span><i class="sw" style="--c:#fab219"></i>Pendiente</span><span><i class="sw" style="--c:#0ca30c"></i>Confirmada</span>
+            <span><i class="sw" style="--c:#7c4fd6"></i>Corregida</span></div>
+          <div><span class="k">Noches</span>
+            <span class="pill w">Por revisar</span><span class="pill x">Revisión completa sugerida</span>
+            <span class="pill r">En revisión</span><span class="pill ok">Finalizada</span></div>
+        </div>
+      </div>
+      <div>
+        <h3>Reglas y recordatorios</h3>
+        <ul>
+          <li>Una época se <b>marca para revisión</b> si la confianza del modelo es menor que <b>0,65</b>.</li>
+          <li>Si el modelo marca más del límite de la noche (alrededor del <b>28 %</b>), se sugiere <b>revisarla completa</b>.</li>
+          <li>Cada decisión se <b>guarda al instante</b>: puede salir y seguir después, también desde otro computador.</li>
+          <li>«Final» y «Solo el modelo» se ven iguales hasta que <b>corrija</b> una época: confirmar no cambia el estadio.</li>
+          <li><b>No suba datos reales de pacientes</b>: es un prototipo académico.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 1 · ANTES DE EMPEZAR ══════════ -->
+  <section id="antes">
+    <h2><span class="n">1</span>Antes de empezar</h2>
+    <h3 style="margin-top:6px">Qué hace SomnoAI</h3>
+    <p>SomnoAI toma una polisomnografía (PSG), la divide en <b>épocas de 30 segundos</b> y un modelo propone para cada
+      una uno de cinco estadios —<b>W, N1, N2, N3 y REM</b>— con su probabilidad. Las épocas en las que el modelo no está
+      seguro quedan <b>marcadas</b> para que un especialista las revise. Usted confirma o corrige, y la noche queda con un
+      <b>hipnograma final</b> que lleva su nombre.</p>
+    <ul>
+      <li>El modelo usa hasta cuatro señales: <b>EEG Fpz-Cz, EEG Pz-Oz, EOG horizontal y EMG submental</b>. Siempre
+        necesita al menos un EEG; el EOG y el EMG lo complementan.</li>
+      <li>Aprendió de la base pública <b>Sleep-EDF Expanded</b> (PhysioNet), cuyos hipnogramas se anotaron con el manual
+        de Rechtschaffen y Kales (R&amp;K), con los estadios 3 y 4 unidos en N3.</li>
+      <li>Cada término técnico de la aplicación tiene una explicación corta: pase el mouse sobre el botón <b>ⓘ</b>
+        o tóquelo. Al final de esta guía está el <a href="#glosario">glosario</a> completo.</li>
+    </ul>
+    <div class="warn">
+      <b class="h">Es un prototipo académico de apoyo a la estadificación.</b>
+      No entrega diagnósticos ni recomendaciones clínicas, y no debe usarse para tomar decisiones clínicas.
+      <b>No suba registros de pacientes reales</b>: el prototipo trabaja con registros públicos de investigación, y
+      los archivos EDF guardan datos de la persona en su encabezado.
+    </div>
+
+    <h3>Ingresar</h3>
+    <figure class="shot narrow">
+      <a href="guia/img/ingresar.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/ingresar.jpg" alt="Pantalla de inicio de sesión con los campos Usuario y Contraseña y el botón Ingresar"></a>
+    </figure>
+    <ol class="marks">
+      <li><b>Usuario</b>: lo entrega el equipo del proyecto; no hay registro de cuentas nuevas.</li>
+      <li><b>Contraseña</b>: también la entrega el equipo, por un canal privado.</li>
+      <li><b>Ingresar</b>.</li>
+    </ol>
+    <p>Arriba a la derecha de la aplicación están el botón de tema claro u oscuro, su nombre, <b>Guía de uso</b>
+      (abre esta guía en otra pestaña; <b>Volver a SomnoAI</b>, arriba en la guía, la cierra y lo devuelve a la
+      aplicación sin pedir la clave otra vez) y <b>Salir</b>. Lo que decide en la revisión queda registrado con el nombre de su cuenta.</p>
+    <div class="note">
+      <b class="h">Para tener la guía al lado de la aplicación</b>
+      Abra la guía con <b>Guía de uso</b>, arrastre su pestaña fuera de la ventana del navegador y ponga cada ventana en
+      una mitad de la pantalla: en Windows, con la tecla <kbd>⊞ Win</kbd> + <kbd>←</kbd> o <kbd>→</kbd>; en macOS,
+      pasando el cursor sobre el botón verde de la ventana y eligiendo la mitad izquierda o derecha. También puede
+      <b>descargar el PDF</b> (botón arriba de esta página) y abrirlo al lado.
+    </div>
+  </section>
+
+  <!-- ══════════ 2 · REGISTROS ══════════ -->
+  <section id="registros">
+    <h2><span class="n">2</span>Registros: las noches analizadas</h2>
+    <p>Es la pantalla de inicio. Muestra todas las noches analizadas por cualquier usuario y el estado de su revisión.</p>
+    <figure class="shot">
+      <a href="guia/img/registros.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/registros.jpg" alt="Pantalla Registros con indicadores, gráfico de épocas marcadas por noche y tabla del historial de análisis"></a>
+    </figure>
+    <ol class="marks">
+      <li><b>Por revisar</b>: noches con épocas marcadas que nadie ha revisado, y cuántas épocas marcadas siguen pendientes.
+        Al lado, <b>Entregado sin revisión</b>: el porcentaje de épocas que el modelo entrega con confianza suficiente (mediana de las noches).</li>
+      <li><b>Revisión completa sugerida</b>: noches en las que el modelo dudó más de lo habitual; conviene revisarlas
+        enteras, no solo las épocas marcadas. Debajo, el gráfico ubica cada noche según su porcentaje de épocas marcadas;
+        la línea vertical es el límite a partir del cual se sugiere la revisión completa. Un clic en un punto abre esa noche.</li>
+      <li><b>Filtros</b> (Todos, Por revisar, Revisión completa, Finalizados) y búsqueda por sujeto o archivo.</li>
+      <li>El <b>estado</b> de cada noche (tabla siguiente). Un clic en la fila abre la noche.</li>
+      <li><b>+ Analizar nuevo</b>: analizar otra noche (sección <a href="#analizar">3</a>).</li>
+      <li><b>Descargar todas las correcciones (.csv)</b>: ver <a href="#exportar">Exportar</a>.</li>
+    </ol>
+    <div class="tw"><table>
+      <thead><tr><th>Estado</th><th>Qué significa</th></tr></thead>
+      <tbody>
+        <tr><td><span class="pill r">En cola</span> o el nombre de un paso</td><td>El análisis está corriendo en el servidor.</td></tr>
+        <tr><td><span class="pill x">Falló</span></td><td>El análisis no terminó. Abra la noche para ver por qué y reintentarlo.</td></tr>
+        <tr><td><span class="pill w">Por revisar · N marcadas</span></td><td>Listo para revisar; nadie ha empezado.</td></tr>
+        <tr><td><span class="pill x">Revisión completa sugerida</span></td><td>El modelo marcó más del límite de la noche: revísela entera.</td></tr>
+        <tr><td><span class="pill r">En revisión · N pend.</span></td><td>Alguien inició la revisión; quedan N épocas marcadas pendientes.</td></tr>
+        <tr><td><span class="pill ok">Finalizada</span></td><td>La revisión se cerró con el nombre de quien la finalizó.</td></tr>
+      </tbody>
+    </table></div>
+    <p>Todos los usuarios ven las mismas noches. Para no duplicar trabajo, coordine quién revisa cada una: el estado
+      «En revisión» indica que alguien ya la empezó.</p>
+    <div class="warn">El ícono de la papelera <b>borra el análisis</b> con sus decisiones, notas y bitácora. La aplicación
+      pide confirmación y la acción no se puede deshacer.</div>
+  </section>
+
+  <!-- ══════════ 3 · ANALIZAR ══════════ -->
+  <section id="analizar">
+    <h2><span class="n">3</span>Analizar una noche</h2>
+    <p>En la pestaña <b>Analizar nuevo</b> (o con <b>+ Analizar nuevo</b> en Registros) hay tres pasos: elegir la noche,
+      revisar los canales y la ventana de análisis, y pulsar <b>Analizar</b>. Si alguien ya analizó la noche que va a
+      revisar, sáltese esta sección y vaya a <a href="#resultados">Leer los resultados</a>.</p>
+
+    <h3 id="catalogo">3.1 Elegir una noche del catálogo</h3>
+    <figure class="shot">
+      <a href="guia/img/analizar-catalogo.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/analizar-catalogo.jpg" alt="Paso 1, Elegir la noche: búsqueda, filtros y lista de noches del catálogo"></a>
+    </figure>
+    <ol class="marks">
+      <li><b>Buscar</b> por sujeto, noche o canal.</li>
+      <li><b>Filtros</b>: <i>Test</i> son noches de personas que el modelo nunca vio al entrenar; <i>Con canales
+        faltantes</i> son copias de noches a las que se les quitaron algunos canales, para probar otras combinaciones.</li>
+      <li>Cada noche muestra sujeto, sexo y edad, los canales que trae para el modelo, la duración, el total de canales
+        del archivo y si tiene <b>hipnograma de referencia</b> (la estadificación hecha por un experto). Haga clic para elegirla.</li>
+      <li><b>¿Tiene su propio registro?</b> Abre la carga de un PSG propio (3.2).</li>
+    </ol>
+
+    <h3 id="subir">3.2 Subir su propio PSG</h3>
+    <figure class="shot">
+      <a href="guia/img/subir-psg.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/subir-psg.jpg" alt="Zona para arrastrar el PSG, con el archivo subido y el hipnograma de referencia adjunto"></a>
+    </figure>
+    <ol class="marks">
+      <li>Pulse <b>«¿Tiene su propio registro? Subir un PSG (.edf)»</b>, debajo del catálogo, y arrastre el archivo a la
+        zona punteada o haga clic en ella para buscarlo. Se acepta un PSG <b>.edf</b> (EDF o EDF+) o un <b>.zip</b> con
+        el PSG y su hipnograma. Tamaño máximo: <b>600 MB</b>.</li>
+      <li>Mientras sube, una barra muestra el avance; después, el servidor revisa el archivo y le muestra lo que encontró:
+        tamaño, cuántos canales tiene y cuántos puede usar el modelo, duración, hora de inicio y, si están en el encabezado,
+        sexo y edad. Con <b>×</b> quita el archivo.</li>
+      <li>Opcional: <b>«+ Adjuntar el hipnograma de referencia (.edf)»</b>, un EDF+ con las anotaciones de estadios (como
+        los <i>*-Hypnogram.edf</i> de Sleep-EDF). Permite recortar la noche con «Noche según el hipnograma» y medir el
+        acuerdo del modelo con el experto. No cambia lo que predice el modelo.</li>
+    </ol>
+    <p>Luego siga con los canales (3.3). Si el archivo no sirve, la aplicación dice por qué:</p>
+    <div class="tw"><table>
+      <thead><tr><th>Mensaje (resumido)</th><th>Qué hacer</th></tr></thead>
+      <tbody>
+        <tr><td>«Formato no aceptado…»</td><td>Suba un <b>.edf</b>, o un <b>.zip</b> con el PSG y su hipnograma.</td></tr>
+        <tr><td>«El archivo supera el límite de 600 MB.»</td><td>Exporte el registro solo con los canales necesarios, o pida ayuda al equipo.</td></tr>
+        <tr><td>«… no es un EDF legible…»</td><td>El archivo está dañado o no es EDF: vuelva a exportarlo desde su sistema de PSG.</td></tr>
+        <tr><td>«… es solo un hipnograma…»</td><td>Suba primero el PSG y adjunte el hipnograma después, como referencia.</td></tr>
+        <tr><td>«… no tiene ninguno de los canales que usa el modelo…» o «… no tiene ningún canal de EEG…»</td>
+          <td>El modelo necesita al menos un EEG. El mensaje lista los canales del archivo: revise que el EEG esté exportado.</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note">
+      <b class="h">¿Qué pasa con el archivo?</b>
+      Se guarda en el servidor solo para analizarlo: si el análisis termina bien, se borra el archivo original y queda
+      guardada la señal de la parte analizada, que usa el visor; si falla, se conserva para poder reintentar; si nadie lo
+      analiza, se borra en un día. Con el modelo del proyecto, el archivo también se envía al servicio del modelo en la
+      nube. Por eso: <b>no suba datos reales de pacientes</b>.
+    </div>
+
+    <h3 id="canales">3.3 Canales para el modelo</h3>
+    <figure class="shot">
+      <a href="guia/img/analizar-canales.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/analizar-canales.jpg" alt="Paso 2, canales para el modelo, y paso 3, ventana de análisis y apagado de luces"></a>
+    </figure>
+    <ol class="marks">
+      <li>Resumen: cuántos canales tiene el archivo y cuántos puede usar el modelo.</li>
+      <li>Una tarjeta por cada entrada del modelo (EEG Fpz-Cz, EEG Pz-Oz, EOG horizontal, EMG submental). El
+        <b>interruptor</b> la activa o la desactiva y la <b>lista</b> elige qué canal del archivo entra ahí. La aplicación
+        asigna sola los que reconoce por su nombre. Si su archivo los llama distinto, elija a mano un canal del
+        <b>mismo tipo</b> (por ejemplo, otra derivación de EEG): un aviso le recuerda con qué canal se entrenó el modelo.
+        También avisa si la frecuencia de muestreo es menor de 100 Hz o si el EMG es crudo (el modelo aprendió con la
+        envolvente del EMG a 1 Hz). Debajo, «En el archivo, no los usa el modelo» lista los demás canales
+        (respiración, temperatura, marcadores…).</li>
+      <li><b>Combinación y desempeño esperado</b>: el acuerdo con el experto que obtuvo el modelo con esa combinación
+        en noches de prueba (F1 macro, de 0 a 1). Las barras ámbar están bajo la meta del proyecto (0,75): con Pz-Oz sola
+        o Pz-Oz + EMG, revise con más atención y, si el registro tiene Fpz-Cz o EOG, agréguelos.</li>
+      <li><b>Ventana de análisis</b> (3.4).</li>
+      <li><b>Apagado de luces</b> (3.4).</li>
+      <li><b>Analizar →</b>. Si está desactivado, el mensaje a su izquierda dice qué falta.</li>
+    </ol>
+    <p>Dos reglas: siempre debe haber <b>al menos un EEG</b>, y un mismo canal del archivo <b>no puede ocupar dos entradas</b>.</p>
+
+    <h3 id="ventana">3.4 Ventana de análisis y apagado de luces</h3>
+    <ul>
+      <li><b>Noche según el hipnograma (±30 min)</b>: desde 30 minutos antes del primer estadio de sueño del hipnograma de
+        referencia hasta 30 minutos después del último. Es el recorte con el que se entrenó y evaluó el modelo. Solo está
+        disponible si hay hipnograma.</li>
+      <li><b>Rango horario</b>: usted indica <i>Desde</i> y <i>Hasta</i>. Útil si no tiene hipnograma; requiere que el
+        archivo traiga la hora de inicio.</li>
+      <li><b>Registro completo</b>: todo el archivo. Los registros ambulatorios de Sleep-EDF duran hasta 22 horas y casi
+        todo es vigilia diurna; para registros de más de 14 horas la aplicación propone un rango horario.</li>
+      <li><b>Apagado de luces</b>: marca el inicio del tiempo en cama y de la latencia de sueño. En las noches del
+        catálogo viene del índice de Sleep-EDF; corríjalo si conoce la hora real. Si lo deja vacío, se toma el inicio de la
+        ventana. La hora se muestra en 24 horas o con a. m./p. m. según la configuración de su computador.</li>
+    </ul>
+
+    <h3 id="avance">3.5 El avance del análisis</h3>
+    <figure class="shot mid">
+      <a href="guia/img/analisis-avance.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/analisis-avance.jpg" alt="Diálogo de avance con los cinco pasos del análisis terminados"></a>
+    </figure>
+    <p>Un diálogo muestra los cinco pasos: <b>Cargar señales, Preprocesar, Predecir, Marcar épocas y Guardar</b>. Al
+      terminar resume cuántas épocas se estadificaron y cuántas quedaron marcadas, y ofrece <b>Ver resultados</b>.</p>
+    <ul>
+      <li>No hace falta esperar: con <b>Seguir en segundo plano</b> el análisis sigue en el servidor y su estado se ve en Registros.</li>
+      <li>Con el modelo del proyecto, si nadie lo ha usado en los últimos minutos, el paso <b>Predecir</b> puede tardar
+        unos 8 minutos mientras el servicio se enciende; el diálogo lo indica.</li>
+      <li>Si un paso falla, el diálogo dice por qué, no guarda resultados parciales y ofrece <b>Reintentar el análisis</b>
+        o <b>Cambiar la configuración</b>.</li>
+    </ul>
+  </section>
+
+  <!-- ══════════ 4 · RESULTADOS ══════════ -->
+  <section id="resultados">
+    <h2><span class="n">4</span>Leer los resultados</h2>
+    <p>Al abrir una noche se ve la <b>Vista clínica</b>: todo lo necesario para estadificar. La pestaña <b>Desempeño del
+      modelo</b> (técnico) mide el acuerdo con el hipnograma del experto y no hace falta para revisar.</p>
+    <figure class="shot">
+      <a href="guia/img/resultados.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/resultados.jpg" alt="Encabezado de resultados con el estado de la noche, Iniciar revisión, exportar e indicadores"></a>
+    </figure>
+    <ol class="marks">
+      <li><b>Estado de la noche</b>.</li>
+      <li><b>La acción de la revisión</b>, siempre en este mismo lugar: <b>Iniciar revisión</b> → <b>Finalizar revisión</b>
+        → <b>Reabrir revisión</b>.</li>
+      <li><b>Exportar clasificación por época (Excel)</b>. Al lado, <b>Analizar otra noche</b>.</li>
+      <li><b>Entregado sin revisión</b>: porcentaje de épocas con confianza de al menos 0,65.</li>
+      <li><b>Marcadas para revisar</b>: cuántas hay, cuántas siguen pendientes y cuántas ya se resolvieron.</li>
+    </ol>
+    <p>Arriba pueden aparecer avisos: <b>«Se sugiere revisar la noche completa»</b> o que la combinación de canales es
+      <b>de las menos precisas</b>. En ambos casos, revise con más atención (ver <a href="#completa">5.6</a>).</p>
+
+    <h3 id="hipnograma">El hipnograma</h3>
+    <figure class="shot">
+      <a href="guia/img/hipnograma.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/hipnograma.jpg" alt="Hipnograma de la noche con las filas revisar, confianza y experto"></a>
+    </figure>
+    <ol class="marks">
+      <li><b>Final (con revisión)</b> muestra los estadios del modelo con sus correcciones encima; <b>Solo el modelo</b>,
+        lo que predijo el modelo. <b>Las dos vistas son iguales hasta que corrija alguna época</b>: confirmar deja el estadio
+        del modelo. La línea bajo el título dice cuántas correcciones hay.</li>
+      <li><b>Leyenda</b>: colores de los estadios y de la revisión. Al pasar el mouse sobre un elemento se resaltan esos tramos en toda la noche.</li>
+      <li>Fila <b>revisar</b>: una marca por cada época marcada, con el color de su estado:
+        <span class="sw" style="--c:#fab219"></span>pendiente, <span class="sw" style="--c:#0ca30c"></span>confirmada,
+        <span class="sw" style="--c:#7c4fd6"></span>corregida.</li>
+      <li>Fila <b>confianza</b>: la probabilidad del estadio elegido a lo largo de la noche. La línea punteada es el umbral (0,65).</li>
+      <li>Fila <b>experto</b>: el hipnograma de referencia, si la noche lo tiene, para comparar.</li>
+    </ol>
+    <p>Un <b>clic</b> en cualquier momento de la noche abre esa época en la revisión (la línea vertical negra marca la
+      época seleccionada). <b>Arrastre</b> para acercar un tramo; <b>doble clic</b>, <kbd>Esc</kbd> o «↺ Ver toda la noche» vuelven.</p>
+
+    <h3 id="arquitectura">Arquitectura del sueño</h3>
+    <figure class="shot">
+      <a href="guia/img/arquitectura.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/arquitectura.jpg" alt="Indicadores de arquitectura del sueño: tiempo en cama, sueño total, eficiencia, latencias, WASO y despertares"></a>
+    </figure>
+    <p>Tiempo en cama, sueño total, eficiencia, latencia de sueño, latencia REM, vigilia después de dormirse (WASO),
+      despertares de 1 minuto o más y, debajo, minutos y porcentaje por estadio. Se calculan sobre el <b>hipnograma final</b>
+      desde el apagado de luces y <b>se recalculan con cada cambio</b>. Las definiciones están en el <a href="#glosario">glosario</a>.</p>
+  </section>
+
+  <!-- ══════════ 5 · REVISIÓN ══════════ -->
+  <section id="revision">
+    <h2><span class="n">5</span>Revisar época a época</h2>
+
+    <h3 id="iniciar" style="margin-top:6px">5.1 Iniciar la revisión</h3>
+    <p>Pulse <b>Iniciar revisión</b> (arriba, junto al estado de la noche). Hasta entonces las opciones están bloqueadas y
+      la aplicación lo recuerda con «Inicia o reabre la revisión para editar». Desde ese momento <b>cada decisión se
+      guarda al instante</b> en el servidor con su nombre, la fecha y la hora: puede salir, recargar la página o seguir
+      otro día, también desde otro computador.</p>
+
+    <h3 id="visor">5.2 El visor de la señal</h3>
+    <figure class="shot">
+      <a href="guia/img/revision-visor.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/revision-visor.jpg" alt="Visor de la señal con controles de tiempo, amplitud y zoom, canales y navegación entre épocas"></a>
+    </figure>
+    <ol class="marks">
+      <li><b>Tiempo</b>: 30 s (solo la época), <b>90 s</b> (la época con la anterior y la siguiente; es la vista inicial), 5 min o 30 min.</li>
+      <li><b>Amplitud − / +</b>: cambia solo la altura de los trazos. Al lado se lee la escala de cada tipo de señal
+        (con ×1, EEG ±100 µV y EOG ±250 µV). Si los picos no caben, la fila crece en vez de recortarlos.</li>
+      <li><b>Zoom − / +</b>: acerca la época a 15, 10, 5 y 2 segundos para ver de cerca un huso o un complejo K; también
+        puede <b>arrastrar sobre la señal</b> para elegir el tramo. Con zoom, los botones ‹ › mueven el tramo sin cambiar la
+        escala; «↺ Restablecer zoom», doble clic o <kbd>Esc</kbd> vuelven a la ventana elegida.</li>
+      <li><b>Canales a la vista</b>: muestre u oculte cada canal. Los que tienen un punto (·) están en el archivo pero el
+        modelo no los usó en este análisis; puede mostrarlos como contexto. Siempre queda al menos uno a la vista.</li>
+      <li>La <b>época seleccionada</b> va en el recuadro azul. Debajo de las señales, una franja con el estadio de cada
+        época y un punto de color con su estado (ámbar pendiente, verde confirmada, morado corregida). El tiempo va en
+        segundos desde el inicio de la época (0 s) y la amplitud en la unidad del archivo EDF (µV). Un clic en otra
+        época del visor la selecciona.</li>
+      <li><b>Navegar</b>: «← Época» y «Época →» van a la vecina; «« Pendiente» y «Pendiente »» saltan entre las marcadas
+        pendientes; el deslizador recorre la noche.</li>
+      <li><b>Ir a la época</b>: escriba el número y pulse «Ir».</li>
+      <li><b>Guardado</b>: «Cada decisión se guarda al instante» → «Guardando…» → «✓ Guardado». Encima, la barra de
+        avance: épocas marcadas resueltas y cambios.</li>
+    </ol>
+    <div class="note">
+      <b class="h">Sugerencia</b>
+      Use 90 s para juzgar el contexto de la época (por ejemplo, la continuidad de N2), 30 s y el zoom para buscar husos,
+      complejos K u ondas lentas, y 5 o 30 minutos para ver la tendencia alrededor.
+    </div>
+
+    <h3 id="decidir">5.3 Decidir: confirmar o corregir</h3>
+    <p>Debajo del visor están los datos de la época seleccionada y las opciones para decidir.</p>
+    <figure class="shot">
+      <a href="guia/img/revision-inspector.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/revision-inspector.jpg" alt="Datos de la época: épocas vecinas, probabilidades, opciones del modelo y evidencia de la señal"></a>
+    </figure>
+    <ol class="marks">
+      <li><b>La época</b>: número, hora y estado, y sus <b>épocas vecinas</b> (anterior y siguiente) con su estadio y de
+        dónde viene (del modelo, pendiente, o confirmada o corregida por quién). Un clic en una vecina la abre.</li>
+      <li><b>Probabilidades del modelo</b> para los cinco estadios.</li>
+      <li><b>Las dos opciones más probables</b>. La <b>1.ª opción</b> es el estadio del modelo: elegirla lo
+        <b>confirma</b> (<kbd>A</kbd> o <kbd>Enter</kbd>). La <b>2.ª opción</b> lo <b>corrige</b> a ese estadio
+        (<kbd>B</kbd>). Cuando el modelo duda, el estadio correcto suele ser uno de los dos.</li>
+      <li><b>Otro estadio</b>: corrige a cualquiera de los otros tres (o con <kbd>W</kbd> <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>R</kbd>).</li>
+      <li><b>↺ Deshacer mi decisión</b> (<kbd>⌫</kbd>): la época vuelve al estadio del modelo y, si estaba marcada, a
+        pendiente. La casilla <b>«Pasar a la siguiente pendiente al decidir»</b> viene activada; desactívela si prefiere
+        quedarse en la época después de decidir.</li>
+      <li><b>Evidencia de la señal</b> (5.4).</li>
+      <li>El <b>resumen de la evidencia</b>: a qué estadio típico de esta noche se parece la época.</li>
+    </ol>
+    <p>Estados de la época: <span class="pill w">Marcada · pendiente</span> <span class="pill ok">✓ Confirmada</span>
+      <span class="pill c">Corregida: N2 → N3</span> <span class="pill auto">No requiere revisión · confianza 92 %</span>.
+      Las épocas que no están marcadas también se pueden corregir si lo considera necesario. Si se equivoca, elija el
+      estadio correcto: <b>vale la última decisión</b>.</p>
+
+    <h3 id="evidencia">5.4 Cómo leer la evidencia de la señal</h3>
+    <p>Muestra cómo se reparte la potencia del EEG por bandas de frecuencia en la época (barra gris) y la compara con
+      la <b>época típica</b> de cada una de las dos opciones <b>en esta misma noche</b> (marca naranja: 1.ª opción; marca
+      morada: 2.ª opción). La época típica de un estadio es la mediana de las épocas de ese estadio que el modelo entregó
+      con confianza o que ya decidió un revisor. Si la noche tiene dos EEG, la lista de arriba a la derecha elige cuál usar.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Banda</th><th>Frecuencias</th><th>Qué suele indicar</th></tr></thead>
+      <tbody>
+        <tr><td>Delta</td><td>0,5–4 Hz</td><td>Ondas lentas; predominan en N3.</td></tr>
+        <tr><td>Theta</td><td>4–8 Hz</td><td>Actividad típica de N1 y de REM.</td></tr>
+        <tr><td>Alfa</td><td>8–12 Hz</td><td>Vigilia relajada con los ojos cerrados.</td></tr>
+        <tr><td>Sigma (husos)</td><td>12–15 Hz</td><td>Husos de sueño, típicos de N2.</td></tr>
+        <tr><td>Beta</td><td>15–30 Hz</td><td>Vigilia activa y microdespertares.</td></tr>
+      </tbody>
+    </table></div>
+    <p>Cada fila tiene su propia escala: compare la barra gris con las marcas de su misma fila, no entre filas.</p>
+    <div class="warn">
+      <b class="h">Es un apoyo, no un criterio de estadificación.</b>
+      Resume la potencia de toda la época: no ve complejos K aislados, movimientos oculares ni el tono muscular, y los
+      artefactos la distorsionan. La frase «se parece más a una N2 típica» orienta, pero la decisión es suya, con la
+      señal y su criterio. Si no hay suficientes épocas seguras de un estadio en la noche, no se muestra su perfil
+      típico. Con «Ocultar evidencia» se oculta el panel.
+    </div>
+
+    <h3 id="cola">5.5 La lista de épocas para revisar</h3>
+    <figure class="shot">
+      <a href="guia/img/cola.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/cola.jpg" alt="Lista de épocas para revisar con filtros Pendientes, Todas las marcadas y Cambiadas"></a>
+    </figure>
+    <ol class="marks">
+      <li><b>Pendientes</b> (marcadas sin decidir), <b>Todas las marcadas</b> o <b>Cambiadas</b> (las que se corrigieron).</li>
+      <li>Cada fila: época, hora, 1.ª y 2.ª opción con su probabilidad, y estado. Un clic la abre en el visor.</li>
+    </ol>
+
+    <h3 id="completa">5.6 Cuando se sugiere la revisión completa</h3>
+    <p>Si el modelo marcó más del límite de la noche (cerca del 28 %; el valor exacto aparece en Registros), duda más de
+      lo habitual en ese registro: revise <b>toda la noche</b>, no solo las épocas marcadas. Recórrala con <kbd>←</kbd>
+      <kbd>→</kbd>: en una época no marcada, <kbd>A</kbd> o <kbd>Enter</kbd> la confirman y pasan a la siguiente. Haga lo
+      mismo cuando la combinación de canales sea de las menos precisas.</p>
+  </section>
+
+  <!-- ══════════ 6 · FINALIZAR ══════════ -->
+  <section id="finalizar">
+    <h2><span class="n">6</span>Finalizar, notas y bitácora</h2>
+    <h3 style="margin-top:6px">Finalizar la revisión</h3>
+    <p>Pulse <b>Finalizar revisión</b>, en el mismo lugar donde la inició. Antes de cerrar se abre un resumen:</p>
+    <figure class="shot mid">
+      <a href="guia/img/finalizar.jpg" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="guia/img/finalizar.jpg" alt="Resumen antes de finalizar con confirmadas, corregidas y marcadas sin revisar"></a>
+    </figure>
+    <ol class="marks">
+      <li>Cuántas épocas <b>confirmó</b>, cuántas <b>corrigió</b> y cuántas marcadas quedan <b>sin revisar</b>.</li>
+      <li>La lista de sus decisiones (época, hora, decisión, estadio del modelo y su estadio), cada una con <b>↺ Deshacer</b>.</li>
+      <li><b>Finalizar revisión</b> la cierra con su nombre, la fecha y la hora. <b>Seguir revisando</b> vuelve sin cerrar.</li>
+    </ol>
+    <p>Si quedan épocas marcadas sin revisar, el hipnograma final las toma tal como las predijo el modelo; el resumen lo
+      advierte. Una revisión finalizada se puede volver a abrir con <b>Reabrir revisión</b>, que pide confirmación y queda
+      en la bitácora.</p>
+    <div class="note">
+      <b class="h">Las dos formas de deshacer hacen lo mismo</b>
+      En la revisión, seleccione la época y pulse <b>↺ Deshacer mi decisión</b> (o <kbd>⌫</kbd>); en el resumen antes de
+      finalizar, pulse <b>↺ Deshacer</b> en su fila. En los dos casos la época vuelve al estadio del modelo y, si estaba
+      marcada, a pendiente.
+    </div>
+
+    <h3>Notas del técnico</h3>
+    <p>En <b>Notas del técnico</b>, debajo de la arquitectura del sueño, escriba observaciones sobre la noche (artefactos,
+      eventos, contexto) y pulse <b>Guardar nota</b> (o <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd>). Cada nota queda con su
+      nombre y la fecha, y también en la bitácora. La aplicación no genera recomendaciones.</p>
+
+    <h3>Detalles del análisis y bitácora</h3>
+    <p><b>Detalles del análisis</b> muestra qué noche se analizó, qué parte (ventana, épocas, apagado de luces), con qué
+      canales y con qué modelo (versión y umbral). La <b>bitácora</b> registra cada cambio: quién, cuándo, qué hizo, el
+      valor anterior y el nuevo. No se puede borrar.</p>
+  </section>
+
+  <!-- ══════════ 7 · EXPORTAR ══════════ -->
+  <section id="exportar">
+    <h2><span class="n">7</span>Exportar</h2>
+    <h3 style="margin-top:6px">La clasificación de una noche (Excel)</h3>
+    <p>En los resultados, <b>Exportar clasificación por época (Excel)</b> descarga una fila por época:</p>
+    <div class="tw"><table>
+      <thead><tr><th>Columna</th><th>Contenido</th></tr></thead>
+      <tbody>
+        <tr><td>epoca · hora · inicio_s</td><td>Número de época, hora del reloj y segundos desde el inicio del registro.</td></tr>
+        <tr><td>prediccion · confianza · segunda_opcion</td><td>Estadio del modelo, su probabilidad y la 2.ª opción.</td></tr>
+        <tr><td>p_W · p_N1 · p_N2 · p_N3 · p_REM</td><td>Probabilidad de cada estadio.</td></tr>
+        <tr><td>marcada_revisar</td><td>1 si la época quedó marcada para revisión.</td></tr>
+        <tr><td>estadio_final · revision · revisado_por</td><td>El estadio del hipnograma final, el resultado de la revisión
+          (confirmada, corregida o pendiente) y quién decidió.</td></tr>
+        <tr><td>referencia</td><td>El estadio del experto, si la noche tiene hipnograma de referencia.</td></tr>
+      </tbody>
+    </table></div>
+    <div class="warn">En el archivo, la numeración de las épocas <b>empieza en 0</b>: la «Época 1» de la pantalla es la
+      fila con <i>epoca</i> = 0. Para ubicar una época, guíese también por la hora.</div>
+
+    <h3>Todas las correcciones (CSV)</h3>
+    <p>En <b>Registros</b>, el enlace <b>descargar todas las correcciones (.csv)</b> reúne cada época que un especialista
+      confirmó o corrigió, de todas las noches, con su autor y fecha. Es el insumo del equipo para medir el modelo en uso y
+      reentrenarlo. Si al abrirlo en Excel las tildes se ven mal, impórtelo con <i>Datos › Desde el texto/CSV</i> y elija la
+      codificación UTF-8.</p>
+  </section>
+
+  <!-- ══════════ 8 · PROBLEMAS FRECUENTES ══════════ -->
+  <section id="problemas" class="faq">
+    <h2><span class="n">8</span>Problemas frecuentes</h2>
+    <div><h4>No veo diferencia entre «Final» y «Solo el modelo».</h4>
+      <p>Es normal mientras no haya correcciones: confirmar una época deja el estadio del modelo. Cuando corrija una época,
+        «Final» la mostrará con su nuevo estadio.</p></div>
+    <div><h4>Los botones de estadio no responden, o aparece «Inicia o reabre la revisión para editar».</h4>
+      <p>La revisión no está iniciada o ya se finalizó. Use <b>Iniciar revisión</b> o <b>Reabrir revisión</b>, arriba.</p></div>
+    <div><h4>Las teclas no hacen nada.</h4>
+      <p>Haga clic fuera de los campos de texto (la nota o «Ir a la época») y cierre cualquier diálogo abierto. Las teclas
+        solo funcionan con la revisión iniciada.</p></div>
+    <div><h4>¿Qué significan los colores en la fila «revisar» del hipnograma?</h4>
+      <p>Ámbar: marcada y pendiente. Verde: usted confirmó el estadio del modelo. Morado: usted lo corrigió.</p></div>
+    <div><h4>Me equivoqué en una época.</h4>
+      <p>Elija el estadio correcto (vale la última decisión) o deshaga la decisión: en la revisión con «↺ Deshacer mi
+        decisión» o <kbd>⌫</kbd>, o en el resumen antes de finalizar con «↺ Deshacer».</p></div>
+    <div><h4>Aparece «⚠ El último cambio no se guardó».</h4>
+      <p>Se perdió la conexión con el servidor y esa época quedó como estaba. Revise su conexión y vuelva a decidirla. Las
+        decisiones anteriores ya están guardadas; si el aviso se repite, recargue la página.</p></div>
+    <div><h4>Quiero seguir otro día o en otro computador.</h4>
+      <p>Cada decisión ya está guardada. Abra la noche desde Registros (estado «En revisión») y continúe; con
+        <kbd>⇧</kbd> + <kbd>→</kbd> va a la siguiente pendiente.</p></div>
+    <div><h4>El análisis falló.</h4>
+      <p>El diálogo (o la noche abierta desde Registros) dice en qué paso y por qué. Pulse <b>Reintentar el análisis</b>.
+        Si falla en <b>Predecir</b>, puede que el servicio del modelo esté apagado: reintente más tarde o avise al equipo.
+        Con <b>Cambiar la configuración</b> puede elegir otros canales u otra ventana.</p></div>
+    <div><h4>El paso «Predecir» tarda mucho.</h4>
+      <p>Si el modelo del proyecto no se había usado en los últimos minutos, tarda unos 8 minutos en encenderse. Puede
+        cerrar el diálogo con «Seguir en segundo plano» y volver luego desde Registros.</p></div>
+    <div><h4>Subí mi archivo y dice que no tiene EEG o que no tiene los canales del modelo.</h4>
+      <p>Vea la tabla de mensajes en <a href="#subir">3.2</a>. Si el EEG tiene otro nombre, asígnelo a mano en el paso de canales.</p></div>
+    <div><h4>La época del Excel no coincide con la de la pantalla.</h4>
+      <p>En el archivo las épocas se numeran desde 0: la época <i>n</i> de la pantalla es la fila con <i>epoca</i> = <i>n</i> − 1.</p></div>
+    <div><h4>Borré una noche por error.</h4>
+      <p>No se puede recuperar desde la aplicación. Avise al equipo: el servidor guarda una copia diaria de la base de datos.</p></div>
+  </section>
+
+  <!-- ══════════ 9 · GLOSARIO ══════════ -->
+  <section id="glosario">
+    <h2><span class="n">9</span>Glosario</h2>
+    <p class="muted">Las mismas explicaciones de los botones ⓘ de la aplicación.</p>
+    <dl class="gl">
+      <dt>Época</dt><dd>Fragmento de 30 segundos del registro; a cada época se le asigna un estadio de sueño.</dd>
+      <dt>Hipnograma</dt><dd>Gráfico del estadio de sueño (W, N1, N2, N3, REM) a lo largo de la noche, época por época.</dd>
+      <dt>Hipnograma final</dt><dd>Los estadios del modelo con las decisiones del revisor encima: donde un especialista confirmó o corrigió, manda su decisión.</dd>
+      <dt>Hipnograma de referencia</dt><dd>Estadificación hecha a mano por un experto para la misma noche. Sirve para medir cuánto acierta el modelo.</dd>
+      <dt>Confianza</dt><dd>Probabilidad que el modelo le da al estadio que eligió: cuanto más alta, más seguro está.</dd>
+      <dt>Umbral de confianza</dt><dd>Si la confianza de una época queda por debajo de 0,65, la época se marca para que un especialista la revise.</dd>
+      <dt>Épocas marcadas</dt><dd>Épocas en las que el modelo no está seguro (confianza bajo 0,65) y que conviene que revise un especialista.</dd>
+      <dt>Por revisar</dt><dd>Noches analizadas con épocas marcadas que nadie ha revisado todavía.</dd>
+      <dt>Revisión completa sugerida</dt><dd>Si el modelo marca más del límite de la noche (cerca del 28 %), se recomienda revisarla entera y no solo las épocas marcadas.</dd>
+      <dt>Entregado sin revisión</dt><dd>Porcentaje de épocas en que el modelo superó el umbral de confianza y que se pueden entregar sin revisión.</dd>
+      <dt>Dos opciones más probables</dt><dd>Los dos estadios a los que el modelo les da más probabilidad en la época; cuando duda, el correcto suele ser uno de ellos.</dd>
+      <dt>Épocas vecinas</dt><dd>Estadio de la época anterior y de la siguiente: ayuda a juzgar si la transición tiene sentido.</dd>
+      <dt>Evidencia de la señal</dt><dd>Cómo se reparte la potencia del EEG por bandas de frecuencia en la época, comparada con las épocas típicas de cada estadio en la misma noche.</dd>
+      <dt>Ventana de análisis</dt><dd>Parte del registro que se envía al modelo: normalmente la noche, con las luces apagadas, sin la vigilia diurna.</dd>
+      <dt>Apagado de luces</dt><dd>Hora en que se apagaron las luces. Marca el inicio del tiempo en cama y de la latencia de sueño.</dd>
+      <dt>Combinación de canales</dt><dd>Las señales que recibe el modelo. Siempre lleva al menos un EEG; el EOG y el EMG lo complementan.</dd>
+      <dt>Noche del test</dt><dd>Noche de una persona que el modelo nunca vio al entrenar: mide su desempeño real.</dd>
+      <dt>Noche con canales faltantes</dt><dd>Copia de una noche de prueba a la que se le quitaron algunos canales del modelo, para ver cómo funciona sin todas las señales.</dd>
+      <dt>Tiempo en cama (TIB)</dt><dd>Desde el apagado de luces (o el inicio de la ventana) hasta el final de la ventana analizada.</dd>
+      <dt>Sueño total (TST)</dt><dd>Minutos en N1, N2, N3 o REM dentro del tiempo en cama.</dd>
+      <dt>Eficiencia del sueño</dt><dd>Sueño total dividido por el tiempo en cama.</dd>
+      <dt>Latencia de sueño</dt><dd>Minutos desde el apagado de luces hasta la primera época de sueño.</dd>
+      <dt>Latencia REM</dt><dd>Minutos desde que se durmió hasta la primera época de REM.</dd>
+      <dt>Vigilia después de dormirse (WASO)</dt><dd>Minutos despierto entre la primera y la última época de sueño.</dd>
+      <dt>Despertares</dt><dd>Veces que la persona estuvo despierta al menos 1 minuto seguido después de dormirse.</dd>
+      <dt>Porcentaje por estadio</dt><dd>N1, N2, N3 y REM como porcentaje del sueño total; la vigilia, como porcentaje del tiempo en cama.</dd>
+      <dt>Desempeño esperado</dt><dd>Lo que obtuvo el modelo del proyecto con una combinación de canales en noches de prueba que nunca vio al entrenar.</dd>
+      <dt>F1 macro</dt><dd>Promedio del acierto (F1) en los cinco estadios, de 0 a 1: les da el mismo peso a los estadios frecuentes y a los raros.</dd>
+      <dt>Kappa de Cohen</dt><dd>Acuerdo entre el modelo y el experto descontando el que se daría por azar: 1 es acuerdo perfecto y 0, azar.</dd>
+      <dt>Versión del modelo</dt><dd>Qué versión del modelo estadificó la noche. Queda guardada con la noche aunque el modelo cambie.</dd>
+      <dt>Bitácora</dt><dd>Registro de cada cambio: quién, cuándo, qué hizo y el valor anterior y el nuevo. No se puede borrar.</dd>
+    </dl>
+  </section>
+
+  <div class="foot">
+    SomnoAI v2 · Maestría en Inteligencia Artificial (MAIA), Universidad de los Andes · Prototipo académico de apoyo a la
+    estadificación del sueño. No entrega diagnósticos ni recomendaciones clínicas. Datos: Sleep-EDF Expanded (PhysioNet).
+  </div>
+</main>
+</div>
+
+<script>
+/* el tema sigue al de la aplicación si se cambia en otra pestaña; el índice marca la sección visible */
+(function () {
+  "use strict";
+  addEventListener("storage", function (e) {
+    if (e.key === "maia_theme" && e.newValue) document.documentElement.dataset.theme = e.newValue;
+  });
+
+  /* Abierta desde la aplicación, el botón vuelve a esa pestaña (cerrando la guía) en vez de
+     cargar otra copia de la aplicación aquí: la sesión vive en cada pestaña y aquí pediría la
+     clave de nuevo. Si la pestaña de la aplicación ya no está, o el navegador no deja cerrar
+     esta, abre la aplicación aquí (con la sesión copiada al abrir la guía, si la había). */
+  function appTab() {
+    try {
+      var o = window.opener;
+      return o && !o.closed && o.location.origin === location.origin ? o : null;
+    } catch (e) { return null; }   // otra procedencia: no es la aplicación
+  }
+  var back = document.getElementById("btnApp");
+  if (back && appTab()) {
+    back.textContent = "Volver a SomnoAI";
+    back.title = "Cierra la guía y vuelve a la pestaña de SomnoAI";
+  }
+  if (back) back.addEventListener("click", function (e) {
+    var o = appTab();
+    if (!o) return;
+    e.preventDefault();
+    try { o.focus(); } catch (err) { /* el navegador decide */ }
+    window.close();
+    setTimeout(function () { if (!window.closed) location.href = back.href; }, 300);
+  });
+
+  var links = [].slice.call(document.querySelectorAll(".toc a"));
+  if (!("IntersectionObserver" in window) || !links.length) return;
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute("href").slice(1)] = a; });
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (!en.isIntersecting) return;
+      links.forEach(function (a) { a.classList.remove("on"); });
+      var a = byId[en.target.id];
+      if (a) a.classList.add("on");
+    });
+  }, { rootMargin: "-20% 0px -70% 0px" });
+  Object.keys(byId).forEach(function (id) { var el = document.getElementById(id); if (el) io.observe(el); });
+})();
+</script>
+</body>
+</html>
