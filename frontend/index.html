@@ -63,6 +63,7 @@ header{background:var(--surface-1);border-bottom:1px solid var(--border);positio
   font:inherit;font-size:12.5px;color:var(--ink2);cursor:pointer;white-space:nowrap}
 .ghost:hover{color:var(--ink);background:var(--surface-3)}
 .ghost[disabled]{opacity:.5;cursor:default}
+a.ghost{display:inline-flex;align-items:center;text-decoration:none}   /* enlace con aspecto de botón (Guía de uso) */
 nav{max-width:var(--wrapW,1180px);margin:0 auto;padding:0 22px;display:flex;gap:2px}
 nav button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 14px;
   font:inherit;font-size:13.5px;color:var(--ink2);cursor:pointer;white-space:nowrap}
@@ -506,7 +507,7 @@ button.ctxbtn:hover{border-color:var(--s1)}
 .mbtns .cta{padding:10px 20px;font-size:13.5px}
 .cta.danger{background:var(--crit)}
 .fincounts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
-.fincounts div{border:1px solid var(--border);border-radius:10px;padding:9px 11px;background:var(--surface-2)}
+.fincounts > div{border:1px solid var(--border);border-radius:10px;padding:9px 11px;background:var(--surface-2)}
 .fincounts .k{font-size:12px;color:var(--muted);font-weight:600}
 .fincounts .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
 .finlist{margin-top:14px;max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:10px}
@@ -529,6 +530,7 @@ button.ctxbtn:hover{border-color:var(--s1)}
 .card .fld input{width:100%;font-size:14px}
 .card .cta{width:100%;margin-top:6px}
 .card .foot{font-size:12px;color:var(--muted);margin-top:18px;text-align:center;line-height:1.5}
+.card .foot a{color:var(--link)}
 .card .tgl{position:absolute;top:16px;right:16px}
 .disclaimer{margin-top:34px;text-align:center;font-size:12px;color:var(--muted)}
 .tgl{width:34px;height:34px;border-radius:50%;border:1px solid var(--border);background:var(--surface-2);color:var(--ink2);
@@ -736,6 +738,8 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
     <div class="grow"></div>
     <span class="mpill" id="modelPill"></span>
     <div class="user">
+      <a class="ghost" id="lnkGuide" href="guia.html" target="_blank" rel="noopener"
+        title="Abre la guía de uso en otra pestaña, para tenerla al lado mientras revisa">Guía de uso</a>
       <button class="tgl" id="btnTheme" title="Cambiar tema" aria-label="Cambiar tema"></button>
       <span class="av" id="userAv">SU</span>
       <span class="nm"><b id="userName">Superusuario</b>Sesión activa</span>
@@ -773,7 +777,8 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
     </div>
     <div class="err" id="loginErr"></div>
     <button class="cta" id="btnIn">Ingresar</button>
-    <div class="foot">Acceso restringido a cuentas del equipo.<br>No hay registro de cuentas nuevas.</div>
+    <div class="foot">Acceso restringido a cuentas del equipo.<br>No hay registro de cuentas nuevas.<br>
+      <a href="guia.html" target="_blank" rel="noopener">Guía de uso</a></div>
   </div>
 </section>
 
@@ -1244,14 +1249,14 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <!-- ?v=N evita que el navegador use JS viejo en caché tras una actualización -->
-<script src="js/config.js?v=14"></script>
-<script src="js/fx.js?v=14"></script>
-<script src="js/charts.js?v=14"></script>
-<script src="js/ui.js?v=14"></script>
-<script src="js/edf.js?v=14"></script>
-<script src="js/mock.js?v=14"></script>
-<script src="js/api.js?v=14"></script>
-<script src="js/review.js?v=14"></script>
-<script src="js/app.js?v=14"></script>
+<script src="js/config.js?v=15"></script>
+<script src="js/fx.js?v=15"></script>
+<script src="js/charts.js?v=15"></script>
+<script src="js/ui.js?v=15"></script>
+<script src="js/edf.js?v=15"></script>
+<script src="js/mock.js?v=15"></script>
+<script src="js/api.js?v=15"></script>
+<script src="js/review.js?v=15"></script>
+<script src="js/app.js?v=15"></script>
 </body>
 </html>

@@ -110,6 +110,7 @@ frontend/                  Tablero (HTML + JS puro, sin dependencias ni build)
   js/ui.js                 glosario (ⓘ), diálogos, pasos del análisis, etiquetas
   js/app.js                sesión, registros y «Analizar nuevo» (catálogo, carga, canales)
   js/review.js             avance, resultados, revisión, notas y desempeño del modelo
+  guia.html · guia/        guía de uso para el especialista: la página, su PDF y las capturas (guia/img)
 backend/
   app/main.py              endpoints (contrato en docs/API_CONTRACT.md)
   app/jobs.py              pipeline por pasos en segundo plano, reintento
@@ -127,6 +128,7 @@ backend/
 docs/
   API_CONTRACT.md          contrato tablero ↔ API
   MODEL_INTEGRATION.md     la frontera del adaptador del modelo
+  guia/                    capturas.py y generar_pdf.sh: rehacer las capturas y el PDF de la guía de uso
 .github/workflows/ci.yml   pruebas en cada pull request
 docker-compose.yml         API + tablero (+ HTTPS con Caddy en el servidor)
 deploy/                    Caddyfile · aws/: crear, actualizar y presupuesto
@@ -261,6 +263,17 @@ sintéticos. Sirve para mostrar la interfaz sin Python.
 6. **Desempeño del modelo** (pestaña aparte) tiene el acuerdo con el hipnograma del experto.
 7. **Exportar clasificación por época (Excel)**: por época, la predicción del modelo, la confianza,
    las probabilidades y el resultado de la revisión. Desde *Registros*, todas las correcciones (CSV).
+
+### Guía de uso (para el especialista)
+
+La guía completa para quien revisa la estadificación está en la aplicación: botón **Guía de uso** del
+encabezado (y enlace en el inicio de sesión), que abre `frontend/guia.html` en otra pestaña para tenerla al
+lado, con un botón para descargarla en PDF (`frontend/guia/SomnoAI_guia_de_uso.pdf`). Si cambia la interfaz:
+
+1. Rehacer las capturas contra una instancia **local y desechable** (toma decisiones y sube un PSG demo):
+   ver las instrucciones al inicio de [`docs/guia/capturas.py`](docs/guia/capturas.py).
+2. Ajustar el texto de `frontend/guia.html` (los números del texto son los de los marcadores de cada captura).
+3. Regenerar el PDF: `sh docs/guia/generar_pdf.sh` (necesita Google Chrome).
 
 ## Pruebas e integración continua
 
