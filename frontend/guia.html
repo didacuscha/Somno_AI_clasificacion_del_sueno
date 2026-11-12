@@ -202,7 +202,7 @@ dl.gl dd{margin:2px 0 0;color:var(--ink2)}
     <img src="assets/uniandes.svg" alt="" width="22" height="26">
     <div class="t">SomnoAI <span>· Guía de uso</span></div>
     <span class="grow"></span>
-    <a class="btn" href="./" title="Ir a la aplicación">Ir a SomnoAI</a>
+    <a class="btn" id="btnApp" href="./" title="Ir a la aplicación">Ir a SomnoAI</a>
     <a class="btn cta" href="guia/SomnoAI_guia_de_uso.pdf" download="SomnoAI_guia_de_uso.pdf"
       title="Descargar esta guía en PDF para tenerla al lado o imprimirla">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5M5 19h14"/></svg>
@@ -324,7 +324,8 @@ dl.gl dd{margin:2px 0 0;color:var(--ink2)}
       <li><b>Ingresar</b>.</li>
     </ol>
     <p>Arriba a la derecha de la aplicación están el botón de tema claro u oscuro, su nombre, <b>Guía de uso</b>
-      (abre esta guía en otra pestaña) y <b>Salir</b>. Lo que decide en la revisión queda registrado con el nombre de su cuenta.</p>
+      (abre esta guía en otra pestaña; <b>Volver a SomnoAI</b>, arriba en la guía, la cierra y lo devuelve a la
+      aplicación sin pedir la clave otra vez) y <b>Salir</b>. Lo que decide en la revisión queda registrado con el nombre de su cuenta.</p>
     <div class="note">
       <b class="h">Para tener la guía al lado de la aplicación</b>
       Abra la guía con <b>Guía de uso</b>, arrastre su pestaña fuera de la ventana del navegador y ponga cada ventana en
@@ -775,6 +776,31 @@ dl.gl dd{margin:2px 0 0;color:var(--ink2)}
   addEventListener("storage", function (e) {
     if (e.key === "maia_theme" && e.newValue) document.documentElement.dataset.theme = e.newValue;
   });
+
+  /* Abierta desde la aplicación, el botón vuelve a esa pestaña (cerrando la guía) en vez de
+     cargar otra copia de la aplicación aquí: la sesión vive en cada pestaña y aquí pediría la
+     clave de nuevo. Si la pestaña de la aplicación ya no está, o el navegador no deja cerrar
+     esta, abre la aplicación aquí (con la sesión copiada al abrir la guía, si la había). */
+  function appTab() {
+    try {
+      var o = window.opener;
+      return o && !o.closed && o.location.origin === location.origin ? o : null;
+    } catch (e) { return null; }   // otra procedencia: no es la aplicación
+  }
+  var back = document.getElementById("btnApp");
+  if (back && appTab()) {
+    back.textContent = "Volver a SomnoAI";
+    back.title = "Cierra la guía y vuelve a la pestaña de SomnoAI";
+  }
+  if (back) back.addEventListener("click", function (e) {
+    var o = appTab();
+    if (!o) return;
+    e.preventDefault();
+    try { o.focus(); } catch (err) { /* el navegador decide */ }
+    window.close();
+    setTimeout(function () { if (!window.closed) location.href = back.href; }, 300);
+  });
+
   var links = [].slice.call(document.querySelectorAll(".toc a"));
   if (!("IntersectionObserver" in window) || !links.length) return;
   var byId = {};
