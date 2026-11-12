@@ -10,9 +10,17 @@ def _pad(value, width: int) -> bytes:
     return str(value).encode("ascii")[:width].ljust(width)
 
 
+# rango físico de cada unidad: ±500 µV expresados en esa unidad
+_PHYS = {"uV": 500, "mV": 0.5, "V": 0.0005}
+
+
 def write_psg(path, channels: dict[str, tuple[np.ndarray, float]], start: datetime,
-              patient: str = "X F X Female_33yr", record_s: int = 30):
-    """channels: etiqueta → (señal en µV, frecuencia). Todas cubren la misma duración."""
+              patient: str = "X F X Female_33yr", record_s: int = 30, units: dict[str, str] | None = None):
+    """channels: etiqueta → (señal en µV, frecuencia). Todas cubren la misma duración.
+    units: unidad del encabezado de algunos canales («mV», «V»); la señal se escribe en esa
+    unidad (el resto, en «uV»)."""
+    units = {lab: (units or {}).get(lab, "uV") for lab in channels}
+    channels = {lab: (x * _PHYS[units[lab]] / 500, fs) for lab, (x, fs) in channels.items()}
     labels = list(channels)
     spr = [int(fs * record_s) for _, fs in channels.values()]
     n_records = len(next(iter(channels.values()))[0]) // spr[0]
@@ -20,12 +28,13 @@ def write_psg(path, channels: dict[str, tuple[np.ndarray, float]], start: dateti
     head = (_pad("0", 8) + _pad(patient, 80) + _pad(f"Startdate {start:%d-%b-%Y}".upper(), 80)
             + _pad(f"{start:%d.%m.%y}", 8) + _pad(f"{start:%H.%M.%S}", 8) + _pad(256 + ns * 256, 8)
             + _pad("", 44) + _pad(n_records, 8) + _pad(record_s, 8) + _pad(ns, 4))
-    pmin, pmax, dmin, dmax = -500, 500, -32768, 32767
-    fields = [(16, labels), (80, [""] * ns), (8, ["uV"] * ns), (8, [pmin] * ns), (8, [pmax] * ns),
+    dmin, dmax = -32768, 32767
+    pmax = {lab: _PHYS[units[lab]] for lab in labels}
+    fields = [(16, labels), (80, [""] * ns), (8, [units[lab] for lab in labels]),
+              (8, [-pmax[lab] for lab in labels]), (8, [pmax[lab] for lab in labels]),
               (8, [dmin] * ns), (8, [dmax] * ns), (80, [""] * ns), (8, spr), (32, [""] * ns)]
     sig_head = b"".join(_pad(v, w) for w, values in fields for v in values)
-    gain = (dmax - dmin) / (pmax - pmin)
-    digital = {lab: np.clip(np.round((x - pmin) * gain + dmin), dmin, dmax).astype("<i2")
+    digital = {lab: np.clip(np.round((x + pmax[lab]) * (dmax - dmin) / (2 * pmax[lab]) + dmin), dmin, dmax).astype("<i2")
                for lab, (x, _) in channels.items()}
     with open(path, "wb") as fh:
         fh.write(head + sig_head)

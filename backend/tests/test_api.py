@@ -343,6 +343,7 @@ def test_los_datos_sobreviven_un_reinicio(client, headers):
     for k in ("epochs", "corrections", "review", "notes", "model"):
         assert after[k] == before[k], k
     assert after["epochs"]["final"][i] == 4
+    assert after["review"]["status"] == "in_review"          # sigue en curso: no hizo falta finalizar
     assert after["history"] == before["history"]
     assert broken["status"] == "failed" and "reinició" in broken["error"]
     assert broken["progress"]["steps"][0]["status"] == "failed"
@@ -399,3 +400,135 @@ def test_el_tablero_se_revalida_tras_un_despliegue(client):
     assert again.status_code == 304                     # sin cambios: no se vuelve a descargar
     script = client.get("/js/config.js")
     assert script.status_code == 200 and "cache-control" not in script.headers
+
+
+# ── la revisión se inicia, se guarda sola y se reabre ─────────────────
+def test_la_revision_se_inicia_se_finaliza_y_se_reabre(client, headers):
+    d = _analyze(client, headers, channels=["fpz"])
+    rid, pred = d["id"], d["epochs"]["stage"]
+    assert d["review"]["status"] in ("to_review", "full_review_suggested") and d["review"]["open"] is False
+    review = lambda action: client.post(f"{API}/records/{rid}/review", headers=headers, json={"action": action})  # noqa: E731
+
+    started = review("start").json()
+    assert started["review"]["status"] == "in_review" and started["review"]["open"] is True
+    assert started["review"]["started_by"] == "Superusuario" and started["review"]["started_at"]
+    assert started["history"][0]["action"] == "start" and started["history"][0]["new"] == "in_review"
+    again = review("start").json()                               # otro usuario ya la había abierto: nada cambia
+    assert again["review"] == started["review"] and len(again["history"]) == len(started["history"])
+    listed = next(r for r in client.get(f"{API}/records", headers=headers).json()["records"] if r["id"] == rid)
+    assert listed["review"]["status"] == "in_review"
+
+    # deshacer la única decisión no cierra la revisión abierta
+    client.patch(f"{API}/records/{rid}/epochs", headers=headers, json={"changes": [{"epoch": 3, "stage": pred[3]}]})
+    out = client.patch(f"{API}/records/{rid}/epochs", headers=headers, json={"changes": [{"epoch": 3, "stage": None}]}).json()
+    assert out["corrections"] == [] and out["review"]["status"] == "in_review" and out["review"]["open"]
+
+    fin = review("finalize").json()
+    assert fin["review"]["status"] == "finalized" and fin["review"]["open"] is False
+    assert fin["review"]["started_by"] == "Superusuario"           # quién la abrió se conserva
+    assert review("start").status_code == 409                      # finalizada: se reabre, no se inicia
+    assert client.patch(f"{API}/records/{rid}/epochs", headers=headers,
+                        json={"changes": [{"epoch": 3, "stage": 0}]}).status_code == 409
+    # reabrir deja la revisión abierta aunque no haya decisiones
+    reopened = review("reopen").json()
+    assert reopened["review"]["status"] == "in_review" and reopened["review"]["open"] is True
+    assert reopened["history"][0]["action"] == "reopen" and reopened["history"][0]["new"] == "in_review"
+    assert review("start").status_code == 200
+    assert review("archivar").status_code == 422
+
+
+def test_el_primer_cambio_inicia_la_revision_y_queda_guardado(client, headers):
+    d = _analyze(client, headers, channels=["fpz"])
+    rid, i = d["id"], d["epochs"]["review"].index(1)
+    assert d["review"]["open"] is False
+    # un cambio inválido no inicia nada
+    bad = client.patch(f"{API}/records/{rid}/epochs", headers=headers, json={"changes": [{"epoch": 99999, "stage": 1}]})
+    assert bad.status_code == 422
+    assert client.get(f"{API}/records/{rid}", headers=headers).json()["history"] == []
+    stage = (d["epochs"]["stage"][i] + 1) % 5
+    out = client.patch(f"{API}/records/{rid}/epochs", headers=headers, json={"changes": [{"epoch": i, "stage": stage}]}).json()
+    assert out["review"]["status"] == "in_review" and out["review"]["started_by"] == "Superusuario"
+    assert [h["action"] for h in out["history"]] == ["set", "start"]
+    # sin finalizar: otro cliente (otro computador) lee la corrección del servidor
+    other = client.get(f"{API}/records/{rid}", headers=headers).json()
+    assert other["epochs"]["final"][i] == stage and other["review"]["status"] == "in_review"
+    assert [c["epoch"] for c in other["corrections"]] == [i]
+
+
+# ── señal: ejes con la unidad del encabezado EDF de cada canal ────────
+def test_la_senal_va_en_la_unidad_del_encabezado_de_cada_canal(client, headers, files, tmp_path):
+    from conftest import START
+    from edf_utils import synthetic_night
+
+    psg = tmp_path / "unidades.edf"
+    write_psg(psg, synthetic_night(1.0), START, units={"EEG Pz-Oz": "mV"})
+    up = client.post(f"{API}/uploads", headers=headers, files={"file": ("unidades.edf", psg.read_bytes())}).json()
+    d = _analyze(client, headers, source={"type": "upload", "id": up["id"]}, channels=["fpz", "pz"],
+                 window_mode="full", lights_off="none")
+    assert d["status"] == "done", d.get("error")
+    assert d["channels"]["units"] == {"fpz": "µV", "pz": "mV", "eog": "µV", "emg": "µV"}
+    sig = client.get(f"{API}/records/{d['id']}/signal", headers=headers,
+                     params={"start_s": 0, "duration_s": 30, "points": 300, "channels": "fpz,pz"}).json()
+    fpz, pz = sig["traces"]["fpz"], sig["traces"]["pz"]
+    assert fpz["unit"] == "µV" and pz["unit"] == "mV" and sig["unit"] is None   # unidades distintas
+    # Fpz-Cz sintético: 40 µV de seno + ruido → decenas de µV, no voltios (0,00004)
+    assert 30 < max(fpz["max"]) < 150 and -150 < min(fpz["min"]) < -30
+    # Pz-Oz sintético: 30 µV de seno + ruido, escrito en mV → centésimas de mV
+    assert 0.02 < max(pz["max"]) < 0.12 and -0.12 < min(pz["min"]) < -0.02
+    one = client.get(f"{API}/records/{d['id']}/signal", headers=headers,
+                     params={"start_s": 0, "duration_s": 30, "points": 300, "channels": "fpz"}).json()
+    assert one["unit"] == "µV"
+
+
+def test_unidades_de_un_encabezado_edf():
+    from app import signals
+
+    assert signals.display_unit("uV") == ("µV", 1.0) and signals.display_unit("µV") == ("µV", 1.0)
+    assert signals.display_unit("mV") == ("mV", 1e-3)
+    assert signals.display_unit("V") == ("V", 1e-6)
+    assert signals.display_unit(None) == ("µV", 1.0)              # registros de antes: siempre en µV
+    # una unidad que MNE no reconoce la deja tal cual (escala 1): el factor la devuelve a su valor físico
+    assert signals.display_unit("%") == ("%", 1e-6) and signals.display_unit("") == ("", 1e-6)
+
+
+def test_los_registros_de_antes_muestran_la_senal_en_microvoltios(client, headers):
+    d = _analyze(client, headers, channels=["fpz"])
+    meta = Path(config.SIGNAL_DIR / d["id"] / "meta.json")
+    m = json.loads(meta.read_text())
+    m.pop("units")                                                 # como lo guardaba la versión anterior
+    meta.write_text(json.dumps(m))
+    sig = client.get(f"{API}/records/{d['id']}/signal", headers=headers,
+                     params={"start_s": 0, "duration_s": 30, "points": 100, "channels": "fpz"}).json()
+    assert sig["unit"] == "µV" and sig["traces"]["fpz"]["unit"] == "µV" and max(sig["traces"]["fpz"]["max"]) > 30
+
+
+# ── exportación en Excel: mismas columnas y filas que antes ───────────
+def test_exportar_la_clasificacion_por_epoca_en_excel(client, headers):
+    import csv as csvmod
+
+    from openpyxl import load_workbook
+
+    d = _analyze(client, headers, channels=["fpz", "eog"])
+    rid, i = d["id"], d["epochs"]["review"].index(1)
+    client.patch(f"{API}/records/{rid}/epochs", headers=headers, json={"changes": [{"epoch": i, "stage": 4}]})
+    r = client.get(f"{API}/records/{rid}/export.xlsx", headers=headers)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml")
+    assert r.headers["content-disposition"] == 'attachment; filename="SC4001E0_clasificacion_por_epoca.xlsx"'
+    ws = load_workbook(io.BytesIO(r.content)).active
+    xlsx = [["" if v is None else str(v) for v in row] for row in ws.iter_rows(values_only=True)]
+    csv_rows = list(csvmod.reader(io.StringIO(client.get(f"{API}/records/{rid}/export.csv", headers=headers).text)))
+
+    def same(a: str, b: str) -> bool:                              # Excel guarda 0.0 como el número 0
+        try:
+            return float(a) == float(b)
+        except ValueError:
+            return a == b
+    assert len(xlsx) == len(csv_rows) and xlsx[0] == csv_rows[0]   # mismas columnas y filas
+    assert all(len(x) == len(c) and all(map(same, x, c)) for x, c in zip(xlsx, csv_rows))   # y valores
+    assert xlsx[0][:6] == ["epoca", "hora", "inicio_s", "prediccion", "confianza", "segunda_opcion"]
+    assert len(xlsx) == 1 + d["night"]["n_epochs"]
+    col = xlsx[0].index
+    assert xlsx[1 + i][col("estadio_final")] == "REM" and xlsx[1 + i][col("revisado_por")] == "Superusuario"
+    assert isinstance(ws.cell(row=2, column=5).value, float)      # la confianza es un número, no texto
+    assert client.get(f"{API}/records/nada/export.xlsx", headers=headers).status_code == 404

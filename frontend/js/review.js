@@ -8,7 +8,11 @@
    - «Desempeño del modelo»: lo técnico (acuerdo con la referencia,
      matriz de confusión, F1, desempeño esperado), aparte.
    Las decisiones se aplican al instante en pantalla y se envían a la
-   API en orden; la respuesta de la API es la que manda al final.
+   API en orden: cada una queda guardada en el servidor al tomarla (no
+   hace falta finalizar). Si una no se guarda, esa época vuelve a como
+   la tiene el servidor. La respuesta de la API es la que manda al final.
+   Solo con la revisión abierta («En revisión») se decide; la acción que
+   la inicia, la finaliza o la reabre está arriba, junto al estado.
    ════════════════════════════════════════════════════════════════════ */
 (function () {
   "use strict";
@@ -30,6 +34,8 @@
     autoAdvance: true,
     chain: Promise.resolve(),    // PATCH en orden
     inflight: 0,
+    saved: new Map(),            // época → estadio según la última respuesta del servidor
+    save: "idle",                // guardado: idle | saving | saved | error
     pollTimer: null,
     viewerTimer: null,
     ev: new Map(),               // evidencia: "época|canal" → respuesta
@@ -68,7 +74,16 @@
     FX.widths(els, cur.from && cur.from.length === vals.length ? cur.from : null, t - cur.t0);
   }
 
-  const locked = () => R.d && R.d.review && (R.d.review.status === "finalized" || R.d.review.status === "signed_off");
+  /* estado de la revisión (lo decide el servidor): por revisar → en revisión → finalizada → (reabrir) */
+  const reviewStatus = () => {
+    const st = R.d && R.d.review && R.d.review.status;
+    return st === "signed_off" ? "finalized" : st;
+  };
+  const finalized = () => reviewStatus() === "finalized";
+  const editable = () => reviewStatus() === "in_review";        // revisión abierta: se puede decidir
+  const LOCK_HINT = "Inicia o reabre la revisión para editar";
+  const LOCK_SVG = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="3" y="7" width="10" height="7.2" rx="1.6" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.4 7V5.1a2.6 2.6 0 0 1 5.2 0V7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
   const isActive = () => !$("vRes").classList.contains("hidden") && !!R.d && R.tab === "clin";
   const clockOf = i => (R.d.night.start_clock_s != null ? R.d.night.start_clock_s + i * R.d.night.epoch_s : null);
   const MODE_TXT = { reference: "Noche según el hipnograma (±30 min)", range: "Rango horario", full: "Registro completo" };
@@ -201,7 +216,8 @@
       r.subset ? '<span class="chip sub">canales faltantes</span>' : null,
       r.created_by ? `por ${esc(r.created_by)}` : null
     ].filter(Boolean).join(" · ");
-    $("btnCsv").disabled = r.status !== "done";
+    $("btnExport").disabled = r.status !== "done";
+    $("revAct").classList.toggle("hidden", r.status !== "done");
   }
 
   /* ── en proceso (abierto desde Registros) ── */
@@ -234,7 +250,9 @@
     const first = !R.d || R.d.id !== d.id;
     R.d = d;
     R.corr = new Map(d.corrections.map(c => [c.epoch, c.stage]));
+    R.saved = new Map(R.corr);
     if (first) {
+      R.save = "idle";
       R.ev.clear();
       R.evGen++;
       R.evLast = "";
@@ -337,9 +355,7 @@
   }
 
   function statusNow() {
-    if (locked()) return "finalized";
-    if (R.corr.size) return "in_review";
-    return R.d.review.whole_night_recommended ? "full_review_suggested" : "to_review";
+    return reviewStatus() || (R.d.review.whole_night_recommended ? "full_review_suggested" : "to_review");
   }
 
   function renderTiles() {
@@ -354,7 +370,7 @@
     const st = statusNow();
     $("rStatus").textContent = UI.STATUS_TXT[st];
     $("rStatus").style.color = `var(${{ finalized: "--ok-text", full_review_suggested: "--crit", in_review: "--s1", to_review: "--warn-text" }[st]})`;
-    $("rStatusN").textContent = locked()
+    $("rStatusN").textContent = finalized()
       ? `por ${d.review.finalized_by || d.review.signed_off_by}`
       : `${rv.confirmed} confirmada${rv.confirmed === 1 ? "" : "s"} · ${rv.corrected} corregida${rv.corrected === 1 ? "" : "s"}`;
     FX.tick($("rStatusN"), $("rStatusN").textContent, d.id);
@@ -439,8 +455,14 @@
   }
 
   function renderGain() {
-    const g = V.gain, kinds = [...new Set(V.channels.map(s => (R.cfg.channels[s] || {}).kind))];
-    const parts = kinds.filter(k => C.SCALE[k]).map(k => `${k.toUpperCase()} ±${Math.round(C.SCALE[k] / g)} µV`);
+    const g = V.gain, units = R.d.channels.units || {}, seen = new Set(), parts = [];
+    // la escala fija de cada tipo (EEG, EOG), en la unidad del encabezado del primer canal de ese tipo
+    V.channels.forEach(s => {
+      const k = (R.cfg.channels[s] || {}).kind, u = units[s] || "µV", per = C.perUv(u);
+      if (!C.SCALE[k] || seen.has(k) || per == null) return;
+      seen.add(k);
+      parts.push(`${k.toUpperCase()} ±${C.fmtAmp((C.SCALE[k] / g) * per)} ${u}`);
+    });
     $("gainOut").textContent = `×${nf(g, g < 1 ? 2 : 1)}${parts.length ? " · " + parts.join(", ") : ""}`;
     FX.tick($("gainOut"), $("gainOut").textContent, R.d.id);
     $("gainUp").disabled = g >= 8 - 1e-9;
@@ -454,11 +476,11 @@
 
   /* ── barra de avance de la revisión ── */
   function renderReviewBar() {
-    const d = R.d, rv = localReview(), status = statusNow();
-    $("revStatus").className = "pill " + { finalized: "ok", in_review: "run", to_review: "w", full_review_suggested: "x" }[status];
-    $("revStatus").textContent = UI.STATUS_TXT[status];
+    const d = R.d, rv = localReview();
+    renderReviewAction();
+    renderSaveState();
     $("revProg").style.width = rv.flagged ? `${(100 * rv.resolved / rv.flagged).toFixed(1)}%` : "100%";
-    if (locked()) {
+    if (finalized()) {
       const at = UI.parse(d.review.finalized_at || d.review.signed_off_at);
       $("revText").innerHTML = `Finalizada por <b>${esc(d.review.finalized_by || d.review.signed_off_by)}</b> el ${UI.dLong.format(at)}, ` +
         `${UI.dTime(at)} · ${rv.corrected} cambio${rv.corrected === 1 ? "" : "s"}`;
@@ -468,9 +490,31 @@
         : `El modelo no marcó épocas · ${rv.corrected} cambio${rv.corrected === 1 ? "" : "s"}`;
     }
     FX.tick($("revText"), $("revText").innerHTML, d.id);
-    $("btnSign").textContent = locked() ? "Reabrir revisión" : "Finalizar revisión";
-    $("btnSign").classList.toggle("ghost", locked());
-    $("btnSign").classList.toggle("cta", !locked());
+  }
+
+  /* acción de la revisión, en un solo lugar (arriba, junto al estado de la noche):
+     «Iniciar revisión» → «Finalizar revisión» → «Reabrir revisión»; siempre con el estilo principal */
+  const ACTION = {
+    in_review: ["Finalizar revisión", "Ver el resumen de sus decisiones y cerrar la revisión con su nombre (se puede reabrir)"],
+    finalized: ["Reabrir revisión", "Volver a abrir la revisión para confirmar o corregir épocas"]
+  };
+  function renderReviewAction() {
+    const st = statusNow(), [txt, tip] = ACTION[st] || ["Iniciar revisión", "Abrir la revisión para confirmar o corregir épocas"];
+    $("btnReview").textContent = txt;
+    $("btnReview").title = tip;
+    $("revStatus").className = "pill " + { finalized: "ok", in_review: "run", to_review: "w", full_review_suggested: "x" }[st];
+    $("revStatus").textContent = UI.STATUS_TXT[st];
+  }
+
+  /* guardado automático: cada decisión viaja al servidor al tomarla y aquí se ve si llegó */
+  const SAVE_TXT = { idle: "Cada decisión se guarda al instante", saving: "Guardando…", saved: "✓ Guardado",
+    error: "⚠ El último cambio no se guardó" };
+  function renderSaveState(kind) {
+    if (kind) R.save = kind;
+    const el = $("saveState");
+    el.className = ["savestate", { saved: "ok", error: "err" }[R.save], R.d && editable() ? "" : "hidden"]
+      .filter(Boolean).join(" ");
+    el.textContent = SAVE_TXT[R.save];
   }
 
   /* ── inspector de la época seleccionada ── */
@@ -513,9 +557,10 @@
     // 1.ª opción = confirmar el estadio del modelo; 2.ª u otro estadio = corregir (US-03)
     // la 1.ª opción se señala como vigente cuando la época no está marcada y nadie decidió
     const cur = !decided && !flagged;
-    const opt = (k, rank) => `<button type="button" data-st="${k}" aria-pressed="${decided && fin === k}" ${locked() ? "disabled" : ""}
+    const open = editable(), lock = open ? "" : 'aria-disabled="true"';
+    const opt = (k, rank) => `<button type="button" data-st="${k}" aria-pressed="${decided && fin === k}" ${lock}
         class="${rank === 1 && cur ? "cur" : ""}"
-        title="${rank === 1 ? `Confirmar ${STG[k].k}, el estadio del modelo (tecla A o Enter)` : `Corregir a ${STG[k].k} (tecla B)`}"><span class="r">${rank}.ª opción</span>
+        title="${!open ? LOCK_HINT : rank === 1 ? `Confirmar ${STG[k].k}, el estadio del modelo (tecla A o Enter)` : `Corregir a ${STG[k].k} (tecla B)`}"><span class="r">${rank}.ª opción</span>
         <span class="s"><i style="background:${STG[k].c}"></i>${STG[k].k}</span><span class="p">${Math.round(100 * p[k])} % de probabilidad</span></button>`;
     const others = STG.map((_, k) => k).filter(k => k !== pred && k !== second);
     // tres columnas de tarjetas: la época y sus vecinas con las probabilidades debajo; las opciones;
@@ -542,17 +587,18 @@
       </div>
       <section class="icard" aria-label="Opciones del modelo">
         <h4>${flagged ? "El modelo duda entre" : "Opciones del modelo"}${UI.info("top2")}</h4>
+        ${open ? "" : `<div class="lockhint" id="iLock" role="note">${LOCK_SVG}<span>${LOCK_HINT}</span></div>`}
         <div class="top2" id="iTop2">${opt(pred, 1)}${opt(second, 2)}</div>
         <div class="dhint">La 1.ª opción confirma el estadio del modelo; la 2.ª u otro estadio lo corrigen.</div>
         <div class="otherlbl">Otro estadio</div>
         <div class="stagebtns">${others.map(k => `<button data-st="${k}" aria-pressed="${decided && k === fin}"
-          ${locked() ? "disabled" : ""} style="${decided && k === fin ? `background:${STG[k].c}` : ""}" title="Corregir a ${STG[k].k} · tecla ${KEY[k]}">
+          ${lock} style="${decided && k === fin ? `background:${STG[k].c}` : ""}" title="${open ? `Corregir a ${STG[k].k} · tecla ${KEY[k]}` : LOCK_HINT}">
           ${STG[k].k}<small>${KEY[k]}</small></button>`).join("")}</div>
         <div class="igap"></div>
         <div class="ifoot">
-          <button class="ghost wide" id="iRevert" ${locked() || !decided ? "disabled" : ""}
-            title="${decided ? `Quita su decisión: la época vuelve al estadio que propuso el modelo (${STG[pred].k}). Tecla Retroceso.` : "Todavía no decidió nada en esta época."}">↺ Deshacer mi decisión</button>
-          ${locked() ? '<div class="mini" style="margin-top:8px">La revisión está finalizada. Reábrala para hacer cambios.</div>' : ""}
+          <button class="ghost wide" id="iRevert" ${!decided ? "disabled" : lock}
+            title="${!decided ? "Todavía no decidió nada en esta época." : !open ? LOCK_HINT
+              : `Quita su decisión: la época vuelve al estadio que propuso el modelo (${STG[pred].k}). Tecla Retroceso.`}">↺ Deshacer mi decisión</button>
           <label class="chk"><input type="checkbox" id="iAuto" ${R.autoAdvance ? "checked" : ""}>
             Pasar a la siguiente pendiente al decidir</label>
         </div>
@@ -863,6 +909,7 @@
         set: e.old === e.new || e.stage === e.previous ? `confirmó la época ${ep} (${v(e.new)})`
           : `cambió la época ${ep}: ${v(e.old)} → <b>${v(e.new)}</b>`,
         clear: `devolvió la época ${ep} al estadio del modelo: ${v(e.old)} → ${v(e.new)}`,
+        start: "inició la revisión",
         finalize: `<b>finalizó la revisión</b>${e.old ? ` (${STATUS_LOW(e.old)} → finalizada)` : ""}`,
         sign_off: "<b>finalizó la revisión</b>",
         reopen: `reabrió la revisión${e.new ? ` (finalizada → ${STATUS_LOW(e.new)})` : ""}`,
@@ -986,7 +1033,7 @@
   /* decide el estadio de una época (null = volver al modelo); la de la selección por omisión */
   function setStage(stage, epoch = R.sel, { advance: adv = true } = {}) {
     if (!R.d) return;
-    if (locked()) { UI.toast("La revisión está finalizada. Reábrala para hacer cambios."); return; }
+    if (!editable()) { nudgeLocked(); return; }
     const i = epoch, ep = R.d.epochs, pred = ep.stage[i];
     const prev = R.corr.has(i) ? R.corr.get(i) : null;
     const wasFlagged = ep.review[i] === 1;
@@ -1022,18 +1069,51 @@
     renderViewerSoon();
   }
 
-  /* las decisiones viajan en orden; cuando no queda ninguna en camino, manda la API */
+  /* intento de decidir con la revisión cerrada: se dice por qué y se señala la acción de arriba */
+  function nudgeLocked() {
+    UI.toast(LOCK_HINT + ".");
+    const h = $("iLock");
+    if (h) { h.classList.add("nudge"); FX.pop(h); }
+    FX.pop($("btnReview"));
+  }
+
+  /* las decisiones viajan en orden y cada una queda guardada en el servidor al responder;
+     cuando no queda ninguna en camino, manda la API */
   function push(epoch, stage) {
     const id = R.d.id;
     R.inflight++;
+    renderSaveState("saving");
     R.chain = R.chain.then(() => MaiaAPI.changeEpochs(id, [{ epoch, stage }]))
-      .then(out => { if (--R.inflight === 0 && R.d && R.d.id === id) applyServer(out); })
+      .then(out => {
+        R.inflight--;
+        if (!R.d || R.d.id !== id) return;
+        R.saved = new Map(out.corrections.map(c => [c.epoch, c.stage]));
+        if (R.inflight === 0) { applyServer(out); renderSaveState("saved"); }
+      })
       .catch(e => {
         R.inflight--;
-        UI.toast(e.message || "No se pudo guardar el cambio.", true);
-        if (R.d && R.d.id === id) MaiaAPI.getRecord(id).then(show).catch(() => {});
+        UI.toast(`No se pudo guardar el cambio de la época ${epoch + 1}: la época queda como estaba. ${e.message || ""}`, true);
+        if (!R.d || R.d.id !== id) return;
+        revertEpoch(epoch, stage);
+        renderSaveState("error");
+        // si el servidor sí responde (p. ej. alguien finalizó la noche), se trae su versión
+        if (R.inflight === 0) MaiaAPI.getRecord(id).then(r => { if (R.d && R.d.id === id && !R.inflight) show(r); }).catch(() => {});
       });
     return R.chain;
+  }
+
+  /* una decisión que no se guardó: la época vuelve a como la tiene el servidor (no se muestra
+     como confirmada ni corregida). Si ya hay otra decisión más nueva para ella, esa manda. */
+  function revertEpoch(epoch, stage) {
+    if ((R.corr.has(epoch) ? R.corr.get(epoch) : null) !== stage) return;
+    const was = R.saved.has(epoch) ? R.saved.get(epoch) : null;
+    if (was === null) R.corr.delete(epoch); else R.corr.set(epoch, was);
+    R.d.epochs.final[epoch] = was === null ? R.d.epochs.stage[epoch] : was;
+    if (R.flash && R.flash.epoch === epoch) R.flash = null;
+    R.ev.clear();
+    R.evGen++;
+    afterLocalChange();
+    renderArchitecture();
   }
 
   function applyServer(out) {
@@ -1122,19 +1202,31 @@
     }
   }
 
-  async function toggleFinalize() {
+  /* la acción de arriba: iniciar (sin revisar) · finalizar (abierta) · reabrir (finalizada) */
+  async function reviewButton() {
     if (!R.d) return;
-    if (!locked()) return openFinalize();
-    const id = R.d.id;
-    const ok = await UI.confirm({ title: "¿Reabrir la revisión?", confirmLabel: "Reabrir revisión",
-      html: "Podrá volver a confirmar o corregir épocas. La reapertura queda en la bitácora." });
-    if (!ok) return;
+    const st = statusNow(), id = R.d.id;
+    if (st === "in_review") return openFinalize();
+    const action = st === "finalized" ? "reopen" : "start";
+    if (action === "reopen") {
+      const ok = await UI.confirm({ title: "¿Reabrir la revisión?", confirmLabel: "Reabrir revisión",
+        html: "Podrá volver a confirmar o corregir épocas. La reapertura queda en la bitácora." });
+      if (!ok) return;
+    }
+    const b = $("btnReview");
+    b.disabled = true;
     try {
-      const out = await MaiaAPI.reviewAction(id, "reopen");
-      if (R.d && R.d.id === id) applyServer(out);
-      UI.toast("Revisión reabierta.");
+      const out = await MaiaAPI.reviewAction(id, action);
+      if (R.d && R.d.id === id) {
+        applyServer(out);
+        renderSaveState("idle");
+        FX.pop($("revStatus"));
+      }
+      UI.toast(action === "start" ? "Revisión iniciada. Cada decisión se guarda al instante." : "Revisión reabierta.");
     } catch (e) {
-      UI.toast(e.message || "No se pudo reabrir la revisión.", true);
+      UI.toast(e.message || (action === "start" ? "No se pudo iniciar la revisión." : "No se pudo reabrir la revisión."), true);
+    } finally {
+      b.disabled = false;
     }
   }
 
@@ -1200,10 +1292,11 @@
   };
   $("gainUp").onclick = () => { V.gain = Math.min(8, V.gain * 1.5); renderGain(); V.render(); };
   $("gainDown").onclick = () => { V.gain = Math.max(0.25, V.gain / 1.5); renderGain(); V.render(); };
-  $("btnSign").onclick = toggleFinalize;
+  $("btnReview").onclick = reviewButton;
   $("finCancel").onclick = () => UI.closeDialog("finModal");
   $("finConfirm").onclick = confirmFinalize;
-  $("btnCsv").onclick = () => R.id && MaiaAPI.exportRecord(R.id).catch(e => UI.toast(e.message, true));
+  $("btnExport").onclick = () => R.id && MaiaAPI.exportRecord(R.id)
+    .catch(e => UI.toast(e.message || "No se pudo exportar la clasificación por época.", true));
   $("btnRetry").onclick = async () => {
     try {
       const r = await MaiaAPI.retry(R.id);

@@ -6,6 +6,7 @@
 fastapi==0.141.1            # framework de la API (contrato en docs/API_CONTRACT.md)
 uvicorn[standard]==0.52.4   # servidor ASGI (backend/run.sh)
 python-multipart==0.0.32    # carga de archivos multipart (POST /analyses)
+openpyxl==3.1.5             # exportación de la clasificación por época en Excel (.xlsx)
 
 # ── señal y EDF ──────────────────────────────────────
 numpy==1.26.4

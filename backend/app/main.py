@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -345,9 +346,13 @@ def get_signal(record_id: str, start_s: float, duration_s: float, points: int = 
     duration_s = min(duration_s, window_s - start_s) or 1.0
     traces = {}
     for slot in wanted:
-        mins, maxs = signals.envelope(sig_dir, slot, start_s, duration_s, points)
-        traces[slot] = {"min": mins, "max": maxs}
-    return {"start_s": start_s, "duration_s": duration_s, "points": points, "unit": "µV", "traces": traces}
+        unit, factor = signals.display_unit(signals.unit_of(sig_dir, slot))
+        mins, maxs = signals.envelope(sig_dir, slot, start_s, duration_s, points, factor)
+        traces[slot] = {"min": mins, "max": maxs, "unit": unit}
+    units = {t["unit"] for t in traces.values()}
+    # `unit`: la de todos los trazos si coinciden (None si no); la de cada uno va en su trazo
+    return {"start_s": start_s, "duration_s": duration_s, "points": points,
+            "unit": units.pop() if len(units) == 1 else None, "traces": traces}
 
 
 # ── evidencia de la señal (US-11) ─────────────────────────────────────
@@ -422,12 +427,21 @@ def _finalized(row: dict) -> dict:
     return {"by": rv.get("finalized_by"), "at": rv.get("finalized_at")} if rv.get("finalized_by") else {}
 
 
+def _started(row: dict) -> dict:
+    rv = row["review"] or {}
+    return {"by": rv.get("started_by"), "at": rv.get("started_at")} if rv.get("started_by") else {}
+
+
 @app.patch(f"{API}/records/{{record_id}}/epochs")
 def change_epochs(record_id: str, body: EpochsBody, user: dict = Depends(auth)):
-    """Confirmar (mismo estadio que el modelo), corregir o volver a la predicción del modelo."""
+    """Confirmar (mismo estadio que el modelo), corregir o volver a la predicción del modelo.
+    Cada cambio queda guardado en la base al responder: no hace falta finalizar para conservarlo.
+    En una revisión sin iniciar, el primer cambio la inicia (y queda en la bitácora)."""
     row = _get_done(record_id)
-    if (row["review"] or {}).get("status") == "finalized":
+    rv = row["review"] or {}
+    if rv.get("status") == "finalized":
         raise _err(409, "review_locked", "La revisión está finalizada. Reábrala para hacer cambios.")
+    started = _started(row) or {"by": user["name"], "at": db.now()}
     detail = row["detail"]
     n = detail["night"]["n_epochs"]
     pred = detail["epochs"]["stage"]
@@ -445,9 +459,12 @@ def change_epochs(record_id: str, body: EpochsBody, user: dict = Depends(auth)):
             current.pop(c.epoch, None)
         else:
             current[c.epoch] = c.stage
+    if rv.get("status") != "in_review":          # revisión sin iniciar: este cambio la inicia
+        db.log_action(record_id, user["name"], "start", rv.get("status"), "in_review")
     if changes:
         db.apply_changes(record_id, changes, user["name"])
-    db.set_review(record_id, review.state(detail["epochs"], current, {}, detail["model"]["night_review_fraction"]))
+    db.set_review(record_id, review.state(detail["epochs"], current, {}, detail["model"]["night_review_fraction"],
+                                          started))
     return _review_payload(db.get(record_id))
 
 
@@ -459,31 +476,40 @@ def review_changes(record_id: str, _: dict = Depends(auth)):
 
 
 class ReviewBody(BaseModel):
-    action: str                        # finalize | reopen
+    action: str                        # start | finalize | reopen
     expected_corrected: int | None = None   # cambios que vio el revisor en el resumen
 
 
 @app.post(f"{API}/records/{{record_id}}/review")
 def review_action(record_id: str, body: ReviewBody, user: dict = Depends(auth)):
+    """start: abre una revisión sin iniciar · finalize: la cierra con el nombre del usuario ·
+    reopen: vuelve a abrir una finalizada. Las decisiones ya están guardadas en cualquier caso."""
     row = _get_done(record_id)
-    if body.action not in ("finalize", "reopen"):
-        raise _err(422, "invalid_action", "Acción desconocida: use finalize o reopen.")
+    if body.action not in ("start", "finalize", "reopen"):
+        raise _err(422, "invalid_action", "Acción desconocida: use start, finalize o reopen.")
     detail, rv = row["detail"], row["review"] or {}
     corr_rows = db.corrections(record_id)
     corr = {e: c["stage"] for e, c in corr_rows.items()}
     frac = detail["model"]["night_review_fraction"]
-    if body.action == "finalize":
+    me = {"by": user["name"], "at": db.now()}
+    if body.action == "start":
+        if rv.get("status") == "finalized":
+            raise _err(409, "review_locked", "La revisión está finalizada: use «Reabrir revisión».")
+        if rv.get("status") == "in_review":
+            return _review_payload(row)          # ya estaba abierta (otro usuario la inició): nada que hacer
+        new = review.state(detail["epochs"], corr, {}, frac, me)
+    elif body.action == "finalize":
         if rv.get("status") == "finalized":
             raise _err(409, "already_finalized", "La revisión ya está finalizada.")
         summary = review.changes(detail, corr_rows)
         if body.expected_corrected is not None and body.expected_corrected != summary["corrected"]:
             raise _err(409, "stale_summary", f"Los cambios de esta noche cambiaron mientras veía el resumen "
                                              f"(ahora son {summary['corrected']}). Revise el resumen de nuevo.")
-        new = review.state(detail["epochs"], corr, {"by": user["name"], "at": db.now()}, frac)
+        new = review.state(detail["epochs"], corr, me, frac, _started(row))
     else:
         if rv.get("status") != "finalized":
             raise _err(409, "not_finalized", "La revisión no está finalizada.")
-        new = review.state(detail["epochs"], corr, {}, frac)
+        new = review.state(detail["epochs"], corr, {}, frac, me)
     db.set_review(record_id, new)
     db.log_action(record_id, user["name"], body.action, rv.get("status"), new["status"])
     return _review_payload(db.get(record_id))
@@ -523,9 +549,38 @@ def _csv_response(rows: list[list], header: list[str], filename: str) -> Respons
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
-@app.get(f"{API}/records/{{record_id}}/export.csv")
-def export_record(record_id: str, _: dict = Depends(auth)):
-    """Hipnograma por época: predicción, probabilidades, revisión y estadio final."""
+def _xlsx_response(rows: list[list], header: list[str], filename: str, sheet: str) -> Response:
+    from openpyxl import Workbook          # import diferido: solo lo usa la exportación
+    from openpyxl.styles import Font
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet
+    ws.append(header)
+    for r in rows:
+        ws.append(r)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    ws.freeze_panes = "A2"                 # el encabezado queda a la vista al desplazarse
+    for k, name in enumerate(header, start=1):
+        ws.column_dimensions[ws.cell(row=1, column=k).column_letter].width = max(9, len(name) + 3)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(buf.getvalue(),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+def _night_name(d: dict) -> str:
+    """Nombre corto de la noche para el archivo: «SC4001E0» (sin «-PSG» ni la extensión)."""
+    name = d.get("night_label") or Path(d.get("file_name") or "noche").stem
+    name = re.sub(r"[-_ ]?psg$", "", name, flags=re.I) or "noche"
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._") or "noche"
+
+
+def _epoch_table(record_id: str) -> tuple[list[str], list[list], dict]:
+    """Clasificación por época: predicción, confianza, probabilidades, revisión y estadio final.
+    Las dos exportaciones (Excel y CSV) salen de aquí: mismas columnas y mismas filas."""
     row = _get_done(record_id)
     d = row["detail"]
     ep, night, st = d["epochs"], d["night"], config.STAGES
@@ -546,6 +601,20 @@ def export_record(record_id: str, _: dict = Depends(auth)):
     header = ["epoca", "hora", "inicio_s", "prediccion", "confianza", "segunda_opcion",
               *[f"p_{s}" for s in st], "marcada_revisar", "estadio_final", "revision", "revisado_por",
               "referencia"]
+    return header, rows, d
+
+
+@app.get(f"{API}/records/{{record_id}}/export.xlsx")
+def export_record_xlsx(record_id: str, _: dict = Depends(auth)):
+    """Clasificación por época en Excel (botón «Exportar clasificación por época (Excel)»)."""
+    header, rows, d = _epoch_table(record_id)
+    return _xlsx_response(rows, header, f"{_night_name(d)}_clasificacion_por_epoca.xlsx", "Clasificación por época")
+
+
+@app.get(f"{API}/records/{{record_id}}/export.csv")
+def export_record(record_id: str, _: dict = Depends(auth)):
+    """La misma clasificación por época en CSV (para scripts; el tablero descarga el Excel)."""
+    header, rows, d = _epoch_table(record_id)
     return _csv_response(rows, header, f"{Path(d['file_name']).stem}_{d['combination']}_{record_id}.csv")
 
 

@@ -15,6 +15,7 @@ document.documentElement.dataset.theme=_t}catch(e){}</script>
   --ink:#0b0b0b; --ink2:#52514e; --muted:#6b6860;
   --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.11); --ctl:#77746b;
   --s1:#2a78d6; --s2:#eb6834;
+  --cta:#1f6bc9;  /* fondo del botón principal: blanco sobre él 5,2:1 (4,8:1 con el hover) */
   --good:#0ca30c; --warn:#fab219; --crit:#d03b3b; --corr:#7c4fd6;
   --ok-text:#006300; --warn-text:#8a5c00; --corr-text:#5b34b0; --link:#1f63b8;
   --shadow:0 1px 2px rgba(11,11,11,.05), 0 4px 14px rgba(11,11,11,.05);
@@ -25,6 +26,7 @@ document.documentElement.dataset.theme=_t}catch(e){}</script>
   --ink:#ffffff; --ink2:#cfcec6; --muted:#a3a19a;
   --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.15); --ctl:#8f8d86;
   --s1:#3987e5; --s2:#d95926; --corr:#9b7bf0;
+  --cta:#1f6bc9;
   --ok-text:#0ca30c; --warn-text:#fab219; --corr-text:#b9a2f5; --link:#6aa8f0;
   --shadow:0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
 }
@@ -151,11 +153,15 @@ nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--s1);
 .filerow .rm:hover{color:var(--crit);border-color:var(--crit)}
 .upbar{height:6px;border-radius:4px;background:var(--surface-3);overflow:hidden;margin-top:6px;max-width:320px}
 .upbar i{display:block;height:100%;background:var(--s1);transition:width .2s ease}
-.cta{background:var(--s1);color:#fff;border:0;border-radius:10px;padding:13px 26px;
+.cta{background:var(--cta);color:#fff;border:0;border-radius:10px;padding:13px 26px;
   font:inherit;font-size:14.5px;font-weight:600;cursor:pointer;box-shadow:var(--shadow)}
 .cta:hover{filter:brightness(1.06)}
 .cta[disabled]{background:var(--surface-3);color:var(--muted);cursor:default;box-shadow:none}
 .cta.sm{padding:9px 16px;font-size:13px}
+/* acción de la revisión (iniciar · finalizar · reabrir): arriba, junto al estado de la noche */
+.revact{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.revact .pill{font-size:12.5px;padding:4px 11px}
+.revact .cta.sm{padding:10px 18px;font-size:13.5px}
 .fields{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;margin-top:16px}
 .fld{display:flex;flex-direction:column;gap:6px}
 .fld label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;display:flex;align-items:center}
@@ -379,6 +385,13 @@ button.ctxbtn:hover{border-color:var(--s1)}
 .stagebtns button[aria-pressed="true"]{color:#fff;border-color:transparent}
 .stagebtns button[aria-pressed="true"] small{color:rgba(255,255,255,.85)}
 .stagebtns button:disabled{cursor:not-allowed;opacity:.5}
+/* revisión sin abrir: las opciones se ven bloqueadas y al tocarlas explican por qué */
+.insp button[aria-disabled="true"]{cursor:not-allowed;opacity:.55}
+.insp .top2 button[aria-disabled="true"]:hover{border-color:var(--border)}
+.lockhint{display:flex;gap:8px;align-items:center;margin:0 0 12px;padding:9px 12px;border-radius:9px;font-size:13px;
+  font-weight:600;color:var(--ink2);background:var(--surface-1);border:1px dashed var(--ctl)}
+.lockhint svg{flex:none;width:15px;height:15px}
+.lockhint.nudge{border-style:solid;border-color:var(--cta);color:var(--ink)}
 .ibtns{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
 .ibtns .ghost{flex:1;padding:7px 8px;font-size:12.5px}
 .dhint{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.5}
@@ -430,6 +443,10 @@ button.ctxbtn:hover{border-color:var(--s1)}
 .kbdhelp{font-size:12px;color:var(--muted);margin-top:12px;display:flex;gap:12px;flex-wrap:wrap}
 .revbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:12px}
 .revbar .txt{font-size:13px;color:var(--ink2)}
+/* guardado automático de cada decisión */
+.savestate{font-size:12.5px;color:var(--muted);display:inline-flex;gap:5px;align-items:center}
+.savestate.ok{color:var(--ok-text)}
+.savestate.err{color:var(--crit);font-weight:600}
 .progress{height:8px;border-radius:5px;background:var(--surface-3);overflow:hidden;min-width:160px;flex:1;max-width:340px}
 .progress i{display:block;height:100%;background:var(--good);border-radius:5px;transition:width .3s ease}
 .queue{max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:11px}
@@ -916,7 +933,12 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
         <div class="ic">EDF</div>
         <div style="min-width:0"><div class="nm" id="resFileName"></div><div class="mt" id="resFileMeta"></div></div>
       </div>
-      <button class="ghost" id="btnCsv">Exportar hipnograma (.csv)</button>
+      <div class="revact hidden" id="revAct" role="group" aria-label="Revisión de la noche">
+        <span class="pill" id="revStatus" title="Estado de la revisión de esta noche"></span>
+        <button class="cta sm" id="btnReview">Iniciar revisión</button>
+      </div>
+      <button class="ghost" id="btnExport"
+        title="Descarga, por cada época, la predicción del modelo, la confianza y el resultado de la revisión">Exportar clasificación por época (Excel)</button>
       <button class="ghost" id="btnOther">Analizar otra noche</button>
     </div>
   </div>
@@ -980,13 +1002,11 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
       <div class="panel" id="wsPanel">
         <div class="phead">
           <h3>Revisión época a época<span data-info="epoch"></span></h3>
-          <span class="pill" id="revStatus"></span>
-          <span class="grow"></span>
-          <button class="cta sm" id="btnSign">Finalizar revisión</button>
         </div>
         <div class="revbar">
           <div class="progress" aria-hidden="true"><i id="revProg" style="width:0"></i></div>
           <span class="txt" id="revText"></span>
+          <span class="savestate" id="saveState" role="status" aria-live="polite"></span>
         </div>
         <div class="ws">
           <div style="min-width:0">
@@ -1224,14 +1244,14 @@ body,header,.panel,.tile,.card,.mbox,.filerow,.drop,.chipset button,nav button,.
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <!-- ?v=N evita que el navegador use JS viejo en caché tras una actualización -->
-<script src="js/config.js?v=13"></script>
-<script src="js/fx.js?v=13"></script>
-<script src="js/charts.js?v=13"></script>
-<script src="js/ui.js?v=13"></script>
-<script src="js/edf.js?v=13"></script>
-<script src="js/mock.js?v=13"></script>
-<script src="js/api.js?v=13"></script>
-<script src="js/review.js?v=13"></script>
-<script src="js/app.js?v=13"></script>
+<script src="js/config.js?v=14"></script>
+<script src="js/fx.js?v=14"></script>
+<script src="js/charts.js?v=14"></script>
+<script src="js/ui.js?v=14"></script>
+<script src="js/edf.js?v=14"></script>
+<script src="js/mock.js?v=14"></script>
+<script src="js/api.js?v=14"></script>
+<script src="js/review.js?v=14"></script>
+<script src="js/app.js?v=14"></script>
 </body>
 </html>

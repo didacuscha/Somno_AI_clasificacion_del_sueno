@@ -250,18 +250,19 @@
              confusion: cm };
   }
 
-  function reviewState(ep, corr, fin, frac) {
+  function reviewState(ep, corr, fin, frac, opened = {}) {
     const flagged = ep.review.reduce((a, f, i) => (f ? [...a, i] : a), []);
     const resolved = flagged.filter(i => i in corr);
     const n = ep.stage.length, whole = flagged.length / n > frac;
     const ent = Object.entries(corr);
     return {
-      status: fin.by ? "finalized" : ent.length ? "in_review" : whole ? "full_review_suggested" : "to_review",
+      status: fin.by ? "finalized" : ent.length || opened.by ? "in_review" : whole ? "full_review_suggested" : "to_review",
       n_epochs: n, flagged: flagged.length, flagged_fraction: Math.round(flagged.length / n * 10000) / 10000,
       whole_night_recommended: whole, resolved: resolved.length, pending: flagged.length - resolved.length,
       confirmed: ent.filter(([i, c]) => c.stage === ep.stage[+i]).length,
       corrected: ent.filter(([i, c]) => c.stage !== ep.stage[+i]).length,
-      finalized_by: fin.by || null, finalized_at: fin.at || null
+      finalized_by: fin.by || null, finalized_at: fin.at || null,
+      open: !fin.by && !!(ent.length || opened.by), started_by: opened.by || null, started_at: opened.at || null
     };
   }
 
@@ -400,7 +401,7 @@
       final, metrics_final: architecture(final, d.night.lights_off_epoch),
       agreement_final: d.epochs.reference ? agreement(final, d.epochs.reference) : null,
       corrections: Object.entries(corr).map(([e, c]) => ({ epoch: +e, ...c })).sort((a, b) => a.epoch - b.epoch),
-      review: reviewState(d.epochs, corr, rec.finalized, d.model.night_review_fraction),
+      review: reviewState(d.epochs, corr, rec.finalized, d.model.night_review_fraction, rec.opened || {}),
       history: rec.history.slice(0, 200), notes: rec.notes
     };
   }
@@ -563,7 +564,7 @@
           min[i] = Math.round(mn * 10) / 10;
           max[i] = Math.round(mx * 10) / 10;
         }
-        traces[slot] = { min, max };
+        traces[slot] = { min, max, unit: "µV" };
       });
       return { start_s: startS, duration_s: durationS, points, unit: "µV", traces };
     },
@@ -591,6 +592,8 @@
       const rec = find(id), d = base(rec);
       if (rec.finalized.by) fail("review_locked", "La revisión está finalizada. Reábrala para hacer cambios.");
       const at = nowISO();
+      if (!dynamic(rec).review.open) log(rec, "start", { old: dynamic(rec).review.status, new: "in_review" });   // el primer cambio la inicia
+      if (!(rec.opened || {}).by) rec.opened = { by: USER, at };
       changes.forEach(({ epoch, stage }) => {
         const model = d.epochs.stage[epoch];
         const prev = epoch in rec.corrections ? rec.corrections[epoch].stage : model;
@@ -620,7 +623,11 @@
     async reviewAction(id, { action, expected_corrected }) {
       await delay(150);
       const rec = find(id), before = dynamic(rec).review;
-      if (action === "finalize") {
+      if (action === "start") {
+        if (rec.finalized.by) fail("review_locked", "La revisión está finalizada: use «Reabrir revisión».");
+        if (before.open) return dynamic(rec);
+        rec.opened = { by: USER, at: nowISO() };
+      } else if (action === "finalize") {
         if (rec.finalized.by) fail("already_finalized", "La revisión ya está finalizada.");
         if (expected_corrected != null && expected_corrected !== before.corrected) {
           fail("stale_summary", `Los cambios cambiaron mientras veía el resumen (ahora son ${before.corrected}).`);
@@ -629,6 +636,7 @@
       } else {
         if (!rec.finalized.by) fail("not_finalized", "La revisión no está finalizada.");
         rec.finalized = {};
+        rec.opened = { by: USER, at: nowISO() };
       }
       log(rec, action, { old: before.status, new: dynamic(rec).review.status });
       save();
@@ -647,13 +655,14 @@
     },
 
     async download(path, fallbackName) {
-      const m = /^\/records\/([^/]+)\/export\.csv$/.exec(path);
+      // modo demo: la clasificación por época sale en CSV (el servidor real entrega el .xlsx)
+      const m = /^\/records\/([^/]+)\/export\.(?:csv|xlsx)$/.exec(path);
       if (m) {
         const rec = find(decodeURIComponent(m[1])), d = base(rec), dyn = dynamic(rec), ep = d.epochs;
         const rows = ep.stage.map((s, i) => [i, d.night.start_epoch * EP + i * EP, STAGES[s], ep.confidence[i], STAGES[ep.second[i]],
           ...ep.probs[i], ep.review[i], STAGES[dyn.final[i]], ep.reference ? (ep.reference[i] >= 0 ? STAGES[ep.reference[i]] : "?") : ""].join(","));
         return csvDownload(["epoca,inicio_s,prediccion,confianza,segunda_opcion,p_W,p_N1,p_N2,p_N3,p_REM,marcada_revisar,estadio_final,referencia",
-          ...rows].join("\n"), `${d.file_name.replace(/\.edf$/i, "")}_${d.combination}.csv`);
+          ...rows].join("\n"), `${d.file_name.replace(/(-PSG)?\.edf$/i, "")}_clasificacion_por_epoca.csv`);
       }
       const rows = [];
       db().records.forEach(rec => Object.entries(rec.corrections).forEach(([e, c]) => {

@@ -27,7 +27,11 @@
     return { code: "unauthorized", message: "La sesión expiró. Inicie sesión de nuevo." };
   }
 
-  async function request(path, { method = "GET", body, timeoutMs } = {}) {
+  /* keepalive: la petición termina aunque se recargue o se cierre la página justo después
+     (una decisión recién tomada no se pierde). Solo en el mismo origen, sin preflight de CORS. */
+  const sameOrigin = () => CFG.apiBase && CFG.apiBase.startsWith(location.origin + "/");
+
+  async function request(path, { method = "GET", body, timeoutMs, keepalive = false } = {}) {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), timeoutMs || CFG.requestTimeoutMs);
     let res;
@@ -36,7 +40,8 @@
         method,
         headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...authHeaders() },
         body: body ? JSON.stringify(body) : undefined,
-        signal: ctrl.signal
+        signal: ctrl.signal,
+        keepalive: keepalive && sameOrigin()
       });
     } catch (e) {
       throw e.name === "AbortError"
@@ -84,7 +89,7 @@
     });
   }
 
-  /* descarga un CSV autenticado (un <a href> no puede mandar el token) */
+  /* descarga un archivo autenticado (un <a href> no puede mandar el token) */
   async function download(path, fallbackName) {
     if (useMock()) return MaiaMock.download(path, fallbackName);
     const res = await request(path);
@@ -166,9 +171,11 @@
     },
 
     /* ── revisión del especialista ── */
+    // cada decisión se guarda en el servidor al tomarla (no hace falta finalizar)
     changeEpochs: (id, changes) => useMock() ? MaiaMock.changeEpochs(id, changes)
-      : http(rec(id) + "/epochs", { method: "PATCH", body: { changes } }),
+      : http(rec(id) + "/epochs", { method: "PATCH", body: { changes }, keepalive: true }),
     getChanges: id => useMock() ? MaiaMock.getChanges(id) : http(rec(id) + "/changes"),
+    // action: start | finalize | reopen
     reviewAction: (id, action, expectedCorrected) => {
       const body = { action, expected_corrected: expectedCorrected ?? null };
       return useMock() ? MaiaMock.reviewAction(id, body) : http(rec(id) + "/review", { method: "POST", body });
@@ -177,7 +184,8 @@
       : http(rec(id) + "/notes", { method: "POST", body: { text } }),
 
     /* ── exportación ── */
-    exportRecord: id => download(rec(id) + "/export.csv", "hipnograma.csv"),
+    // clasificación por época (predicción, confianza, probabilidades y revisión) en Excel
+    exportRecord: id => download(rec(id) + "/export.xlsx", "clasificacion_por_epoca.xlsx"),
     exportCorrections: () => download("/corrections/export.csv", "correcciones_somnoai.csv")
   };
 })();

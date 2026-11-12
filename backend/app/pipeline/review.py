@@ -7,10 +7,12 @@ hipnograma final es la predicción con esas decisiones encima, y las métricas d
 noche se recalculan sobre él.
 
 Estado de la noche (review.status):
-  to_review              analizada, a la espera del especialista
+  to_review              analizada, a la espera del especialista (revisión sin iniciar)
   full_review_suggested  ídem, pero se marcó más del 27,3 % de la noche
-  in_review              el especialista ya confirmó o corrigió alguna época
+  in_review              revisión abierta: alguien la inició o la reabrió, o ya hay decisiones
   finalized              revisión finalizada (se puede reabrir)
+Solo con la revisión abierta (`open`) se confirman o corrigen épocas. Las decisiones se
+guardan en la base una por una, al tomarlas: finalizar no es lo que las guarda.
 """
 import numpy as np
 
@@ -44,8 +46,11 @@ def final_stages(predicted: list[int], corrections: dict[int, int]) -> list[int]
     return out
 
 
-def state(epochs: dict, corrections: dict[int, int], finalized: dict, night_fraction: float) -> dict:
-    """Avance de la revisión: marcadas, resueltas, confirmadas, corregidas y estado de la noche."""
+def state(epochs: dict, corrections: dict[int, int], finalized: dict, night_fraction: float,
+          started: dict | None = None) -> dict:
+    """Avance de la revisión: marcadas, resueltas, confirmadas, corregidas y estado de la noche.
+    `started` ({by, at}) es quién la inició o la reabrió por última vez."""
+    started = started or {}
     pred = epochs["stage"]
     flagged = [i for i, f in enumerate(epochs["review"]) if f]
     resolved = [i for i in flagged if i in corrections]
@@ -53,7 +58,7 @@ def state(epochs: dict, corrections: dict[int, int], finalized: dict, night_frac
     whole = bool(n and len(flagged) / n > night_fraction)
     if finalized.get("by"):
         status = "finalized"
-    elif corrections:
+    elif corrections or started.get("by"):
         status = "in_review"
     else:
         status = "full_review_suggested" if whole else "to_review"
@@ -69,6 +74,9 @@ def state(epochs: dict, corrections: dict[int, int], finalized: dict, night_frac
         "corrected": sum(1 for i, s in corrections.items() if s != pred[i]),
         "finalized_by": finalized.get("by"),
         "finalized_at": finalized.get("at"),
+        "open": status == "in_review",
+        "started_by": started.get("by"),
+        "started_at": started.get("at"),
     }
 
 

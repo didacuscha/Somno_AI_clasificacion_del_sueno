@@ -594,8 +594,25 @@
 
   /* ── Visor de señal multicanal ──
      Pide la envolvente mín-máx a la API por ventana (nunca la señal cruda
-     completa) y pinta de fondo el estadio final de cada época.             */
+     completa) y pinta de fondo el estadio final de cada época.
+     Ejes: tiempo en segundos desde el inicio de la época elegida (abajo) y,
+     por canal, la amplitud en la unidad de su encabezado EDF (a la izquierda). */
   const SCALE = { eeg: 100, eog: 250 };   // µV a media altura de la fila
+  // unidades de voltaje: cuántas hay en 1 µV (para llevar SCALE a la unidad del canal)
+  const PER_UV = { "µV": 1, mV: 1e-3, V: 1e-6, nV: 1e3 };
+  const perUv = u => PER_UV[u];
+  const unitText = u => u || "sin unidad";
+  // amplitud legible: entera desde 10; si no, dos cifras significativas (0,05 mV)
+  const fmtAmp = v => (Math.abs(v) >= 10 ? Math.round(v).toLocaleString("es-CO")
+    : v.toLocaleString("es-CO", { maximumSignificantDigits: 2 })).replace("-", "−");
+  // mayor valor «redondo» (1, 2, 2,5 o 5 × 10ⁿ) que no pasa de x: las marcas del eje de amplitud
+  const niceDown = x => {
+    if (!(x > 0)) return 0;
+    const p = Math.pow(10, Math.floor(Math.log10(x)));
+    return [5, 2.5, 2, 1].map(m => m * p).find(v => v <= x * (1 + 1e-9)) || p;
+  };
+  // pasos del eje de tiempo, en segundos
+  const T_STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900];
   // niveles de «Zoom +», en fracciones de la época: 15 s, 10 s, 5 s y 2 s con épocas de 30 s
   const ZOOM_FR = [1 / 2, 1 / 3, 1 / 6, 1 / 15];
 
@@ -682,7 +699,7 @@
       const d = this.d, EP = d.night.epoch_s, T0 = d.night.start_clock_s, n = d.night.n_epochs;
       const [t0, t1] = this.range(), dur = t1 - t0;
       const chans = this.channels.length ? this.channels : [];
-      const W = fitW(this.el, 340, 1080), L = 76, R = 8, Tp = 6, pw = W - L - R;
+      const W = fitW(this.el, 340, 1080), L = 124, R = 14, Tp = 6, pw = W - L - R;
       // con pocos canales cada trazo crece; el EMG (envolvente lenta) va siempre en una fila baja
       const slow = slot => (d.channels.fs[slot] || 0) < 10;
       const tall = Math.max(66, Math.min(120, Math.floor(250 / Math.max(1, chans.filter(c => !slow(c)).length))));
@@ -698,23 +715,31 @@
       if (my !== this._token) return;       // llegó tarde: hubo otra petición después
       this.el.classList.remove("loading");
 
-      // alto de cada fila (amplitud sin recortes): la escala (px por µV) la fija la amplitud elegida;
+      // unidad de cada trazo: la de su encabezado EDF, que manda la API con la señal
+      const unitOf = slot => ((env.traces[slot] || {}).unit ?? env.unit ?? (d.channels.units || {})[slot]) ?? "µV";
+
+      // alto de cada fila (amplitud sin recortes): la escala (px por unidad) la fija la amplitud elegida;
       // si los picos de lo que se ve no caben en el alto base, la fila crece en medios pasos hasta que
       // entren (con tope), y al bajar la amplitud vuelve a encogerse
       const geo = {};
       chans.forEach(slot => {
-        const tr = env.traces[slot], info = this.info[slot] || { kind: "eeg" };
+        const tr = env.traces[slot], info = this.info[slot] || { kind: "eeg" }, per = perUv(unitOf(slot));
         const peak = tr ? Math.max(0, ...tr.max.map(Math.abs), ...tr.min.map(Math.abs)) : 0;
-        const amp0 = SCALE[info.kind] || (tr ? Math.max(1, peak) * 1.1 : 100);
+        // EEG y EOG: escala fija (en µV, llevada a la unidad del canal); el resto, según sus picos
+        const amp0 = SCALE[info.kind] && per != null ? SCALE[info.kind] * per
+          : (tr ? Math.max(per != null ? per : 1e-9, peak) * 1.1 : 100 * (per ?? 1));
         const half0 = baseH(slot) / 2 - 2, k = half0 / (amp0 / this.gain), need = peak * k;
         const half = need > half0 ? Math.min(Math.max(4 * half0, 200), (half0 * Math.ceil((2 * need) / half0)) / 2) : half0;
         geo[slot] = { h: 2 * half + 4, k, amp: half / k, clipped: need > half + 0.5 };
       });
       const TRK = 20, rowsH = chans.reduce((a, c) => a + geo[c].h + 6, 0);
-      const H = Tp + rowsH + TRK + 34;
+      const axY = Tp + rowsH + TRK, H = axY + 40;               // bajo la pista: marcas y título del tiempo
+      const units = [...new Set(chans.map(unitOf))];
+      const yTitle = `Amplitud (${units.length > 1 ? "unidad de cada canal" : unitText(units[0])})`;
 
       const s = svg(W, H);
-      s.setAttribute("aria-label", "Señal del registro");
+      s.setAttribute("aria-label", `Señal del registro. Eje horizontal: tiempo en segundos desde el inicio de la época ${this.epoch + 1}. ` +
+        `Eje vertical: ${yTitle.toLowerCase()}.`);
       const x = t => L + ((t - t0) / dur) * pw;
       const e0 = Math.floor(t0 / EP), e1 = Math.ceil(t1 / EP);
       const final = d.epochs.final;
@@ -758,12 +783,24 @@
         const rowG = slide.appendChild(S("g")), labG = s.appendChild(S("g"));
         rows[slot] = { mid, h, k: g.k, rowG, labG };
         rowG.appendChild(S("line", { x1: L, x2: W - R, y1: mid, y2: mid, stroke: CV("--grid") }));
-        labG.appendChild(T({ x: L - 8, y: mid - 2, "text-anchor": "end", "font-size": 12, "font-weight": 650,
+        // nombre del canal y su unidad; a la derecha, las marcas de amplitud (+a, 0, −a) en esa unidad
+        const unit = unitOf(slot), per = perUv(unit), NX = L - 42;
+        labG.appendChild(T({ x: NX, y: mid - 2, "text-anchor": "end", "font-size": 12, "font-weight": 650,
           fill: CV(used ? "--ink" : "--muted") }, info.name));
-        labG.appendChild(T({ x: L - 8, y: mid + 11, "text-anchor": "end", "font-size": 10.5, fill: CV("--muted") },
-          `±${Math.round(amp)} µV${used ? "" : " · no usado"}`));
+        labG.appendChild(T({ x: NX, y: mid + 11, "text-anchor": "end", "font-size": 10.5, fill: CV("--muted") },
+          per != null || unit ? `±${fmtAmp(amp)} ${unitText(unit)}` : unitText(unit)));  // alcance de la fila: cambia con la amplitud
+        if (!used) labG.appendChild(T({ x: NX, y: mid + 24, "text-anchor": "end", "font-size": 10.5, fill: CV("--muted") }, "no usado"));
+        // marcas a un valor redondo, a 8 px o más del borde de la fila (no chocan con las de la vecina);
+        // el 0 se rotula solo si hay lugar entre las tres
+        const tv = niceDown((h / 2 - 2 - 8) / g.k);
+        [tv, 0, -tv].forEach(v => {
+          const yy = mid - v * g.k;
+          labG.appendChild(S("line", { x1: L - 4, x2: L, y1: yy, y2: yy, stroke: CV("--axis") }));
+          if (v || tv * g.k >= 11) labG.appendChild(T({ x: L - 6, y: yy + 3.5, "text-anchor": "end", "class": "tick" },
+            v > 0 ? "+" + fmtAmp(v) : fmtAmp(v)));
+        });
         if (g.clipped) {            // ni con el tope de alto caben los picos: se avisa que el trazo va recortado
-          const w = labG.appendChild(T({ x: L - 8, y: mid + 24, "text-anchor": "end", "font-size": 10.5, "font-weight": 600,
+          const w = labG.appendChild(T({ x: NX, y: mid + (used ? 24 : 37), "text-anchor": "end", "font-size": 10.5, "font-weight": 600,
             fill: CV("--warn-text") }, "recortada"));
           w.appendChild(S("title")).textContent = "Hay picos más altos que el alto máximo de la fila. Baje la amplitud para verlos completos.";
         }
@@ -795,16 +832,21 @@
           stroke: CV("--surface-1"), "stroke-width": 1 }));
       }
 
-      // eje x
-      // con zoom de pocos segundos, las marcas van cada segundo y con décimas
-      const fmt = dur < 20 ? (v => clockHMS(v) + "," + Math.floor((v % 1) * 10)) : dur <= 120 ? clockHMS : clockHM;
-      const per = dur <= 12 ? 1 : dur <= 40 ? 5 : 15;
-      const ticks = Math.max(2, Math.min(dur <= 90 ? Math.round(dur / per) : 6, Math.floor(pw / 85)));
-      for (let i = 0; i <= ticks; i++) {
-        const t = t0 + (i / ticks) * dur;
-        s.appendChild(T({ x: x(t), y: H - 12, "text-anchor": "middle", "class": "tick" },
-          T0 != null ? fmt(T0 + t) : nf(t / 60, 1) + " min"));
+      // eje y: título (girado) a la izquierda de las filas
+      s.appendChild(T({ x: 0, y: 0, transform: `translate(12 ${Tp + rowsH / 2}) rotate(-90)`, "text-anchor": "middle",
+        "class": "axlbl" }, yTitle));
+
+      // eje x: segundos desde el inicio de la época elegida (0 y 30 son sus bordes); las marcas,
+      // a pasos redondos que quepan en el ancho; con zoom de pocos segundos, en décimas
+      const ep0 = this.epoch * EP, rel = t => t - ep0;
+      const step = T_STEPS.find(st => dur / st <= Math.max(2, Math.floor(pw / 64))) || T_STEPS[T_STEPS.length - 1];
+      for (let k = Math.ceil(rel(t0) / step - 1e-6); k * step <= rel(t1) + 1e-6; k++) {
+        const v = k * step, X = x(ep0 + v);
+        s.appendChild(S("line", { x1: X, x2: X, y1: axY, y2: axY + 4, stroke: CV("--axis") }));
+        s.appendChild(T({ x: X, y: axY + 16, "text-anchor": "middle", "class": "tick" }, nf(k ? v : 0, step < 1 ? 1 : 0)));
       }
+      s.appendChild(T({ x: L + pw / 2, y: axY + 33, "text-anchor": "middle", "class": "axlbl" }, "Tiempo (s)"));
+      const clk = dur < 20 ? (v => clockHMS(v) + "," + Math.floor((v % 1) * 10)) : dur <= 120 ? clockHMS : clockHM;
 
       // interacción: hora y estadio bajo el cursor; clic para elegir época
       const xh = S("line", { y1: Tp, y2: Tp + rowsH + TRK, stroke: CV("--ink2"), "stroke-dasharray": "3 3", opacity: 0, "class": "xhair" });
@@ -815,7 +857,7 @@
         if (ev.buttons) { xh.setAttribute("opacity", 0); Tip.hide(); return; }  // arrastrando: sin tooltip
         const t = tAt(ev), e = Math.min(n - 1, Math.floor(t / EP)), X = x(t);
         xh.setAttribute("x1", X); xh.setAttribute("x2", X); xh.setAttribute("opacity", 1);
-        Tip.show(`<span class="tt">${T0 != null ? clockHMS(T0 + t) + " · " : ""}época ${e + 1}</span>` +
+        Tip.show(`<span class="tt">${T0 != null ? clockHMS(T0 + t) + " · " : ""}época ${e + 1} · ${nf(rel(t), 1)} s</span>` +
           `Estadio final: <b>${STG[final[e]].k}</b>` + (e !== this.epoch ? "<br>Clic para revisar esta época" : "") +
           "<br>Arrastre para acercar un tramo", ev);
       });
@@ -887,12 +929,12 @@
       chans.forEach(slot => { rowsMemo[slot] = { mid: rows[slot].mid, h: rows[slot].h, k: rows[slot].k }; });
       this._prev = { id: d.id, W, dur, t0, gain: this.gain, ch: chKey, box: boxBox, rows: rowsMemo, rowsH, ty };
       const now = document.getElementById("sigNow");
-      if (now) now.textContent = T0 != null ? `${fmt(T0 + t0)} – ${fmt(T0 + t1)}` : "";
+      if (now) now.textContent = (T0 != null ? `${clk(T0 + t0)} – ${clk(T0 + t1)} · ` : "") + `0 s = inicio de la época ${this.epoch + 1}`;
     }
   };
 
   window.MaiaCharts = {
     STG, STATUS, Tip, epochStatus, renderStrip, renderCombos, renderHypnogram, renderStageBars,
-    renderConfusion, renderF1, renderQuality, SignalViewer, SCALE
+    renderConfusion, renderF1, renderQuality, SignalViewer, SCALE, perUv, fmtAmp
   };
 })();

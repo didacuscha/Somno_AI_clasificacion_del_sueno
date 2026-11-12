@@ -184,13 +184,17 @@ Todos los análisis, más reciente primero.
   "review": {
     "status": "in_review", "n_epochs": 841, "flagged": 234, "flagged_fraction": 0.2782,
     "whole_night_recommended": true, "resolved": 2, "pending": 232, "confirmed": 1, "corrected": 1,
-    "finalized_by": null, "finalized_at": null
+    "finalized_by": null, "finalized_at": null,
+    "open": true, "started_by": "Dra. X", "started_at": "2026-10-27T19:20:11"
   }
 } ] }
 ```
 - `status` del análisis: `queued | running | done | failed`.
-- `review.status` = **estado de la noche**: `to_review` (analizada, por revisar) ·
-  `full_review_suggested` (se marcó más del 27,3 %) · `in_review` (ya hay decisiones) · `finalized`.
+- `review.status` = **estado de la noche**: `to_review` (analizada, por revisar; revisión sin iniciar) ·
+  `full_review_suggested` (ídem, se marcó más del 27,3 %) · `in_review` (revisión abierta: alguien la
+  inició o la reabrió, o ya hay decisiones) · `finalized`.
+- `review.open`: la revisión está abierta (`in_review`): solo así el tablero deja confirmar o corregir.
+  `started_by` / `started_at`: quién la inició o la reabrió por última vez.
 - Marcadas = épocas con confianza bajo el umbral; resueltas = marcadas que el revisor decidió;
   `confirmed` / `corrected` = épocas que el revisor dejó igual / cambió respecto del modelo.
 
@@ -240,19 +244,24 @@ Notas:
   (W como % del tiempo en cama; el resto, % del sueño total). Se cuentan desde el apagado de luces.
 - `agreement.*` (solo con referencia): `n_epochs`, `accuracy`, `mf1`, `kappa`, `f1` por estadio y
   `confusion` (5×5, filas = referencia, columnas = predicción).
-- `history[].action`: `set` (confirmar o corregir) · `clear` (volver al modelo) · `finalize` ·
-  `reopen` · `note` · `retry`, con el valor anterior (`old`) y el nuevo (`new`).
+- `history[].action`: `start` (iniciar la revisión) · `set` (confirmar o corregir) · `clear` (volver al
+  modelo) · `finalize` · `reopen` · `note` · `retry`, con el valor anterior (`old`) y el nuevo (`new`).
+- `channels.units`: la unidad de cada canal del visor según su encabezado EDF (`"µV"` en Sleep-EDF).
 
 ### DELETE `/records/{id}`
 **200** `{"deleted": "<id>"}` · **404** · **409 busy** si el análisis sigue en proceso.
 Borra también decisiones, notas, bitácora y señal derivada.
 
 ### GET `/records/{id}/signal?start_s=2400&duration_s=90&points=800&channels=fpz,eog`
-Envolvente mín-máx por canal para la ventana visible (nunca la señal cruda completa).
+Envolvente mín-máx por canal para la ventana visible (nunca la señal cruda completa), en la unidad
+que declara el encabezado EDF de cada canal (Sleep-EDF: µV; un canal en mV llega en mV).
 ```json
 { "start_s": 2400, "duration_s": 90, "points": 800, "unit": "µV",
-  "traces": { "fpz": { "min": [-42.1, "…"], "max": [38.9, "…"] }, "eog": { "…": "…" } } }
+  "traces": { "fpz": { "min": [-42.1, "…"], "max": [38.9, "…"], "unit": "µV" }, "eog": { "…": "…" } } }
 ```
+`unit`: la de todos los trazos si coinciden; `null` si son distintas (cada trazo trae la suya).
+La señal se guarda en µV (MNE la entrega en voltios y se multiplica por 10⁶); la API la devuelve a
+la unidad del encabezado.
 
 ### GET `/records/{id}/epochs/{epoch}/evidence[?channel=pz]`
 Evidencia espectral de la época: potencia relativa del EEG por banda (Welch, 0,5–30 Hz) y el perfil
@@ -279,6 +288,9 @@ un revisor, según el hipnograma final).
 - `stage` 0–4: el estadio que decide el revisor. Igual al del modelo = **confirmada**; distinto = **corregida**.
 - `stage: null`: vuelve al estadio del modelo (deshace la decisión).
 - Cada cambio queda en la bitácora con usuario, fecha, valor anterior y nuevo.
+- Cada cambio queda **guardado en la base al responder**: no hace falta finalizar para conservarlo
+  (sobrevive a recargar el navegador, a otro computador y a reiniciar o redesplegar la API).
+- En una revisión sin iniciar (`to_review`), el primer cambio la inicia (`start` en la bitácora).
 
 **200** → `{ "final", "metrics_final", "agreement_final", "corrections", "review", "history", "notes" }`.
 **409 review_locked** si la revisión está finalizada · **422 out_of_range / invalid_stage**.
@@ -292,10 +304,13 @@ Resumen antes de finalizar:
   el resumen las lista para poder deshacer cualquiera.
 
 ### POST `/records/{id}/review`
+`{ "action": "start" }` inicia una revisión sin iniciar (queda `in_review`, abierta). Si ya estaba
+abierta, no cambia nada; si está finalizada → **409 review_locked** (se reabre, no se inicia).
 `{ "action": "finalize", "expected_corrected": 3 }` finaliza la revisión con el nombre del usuario
 (con épocas pendientes, el hipnograma final las toma como las predijo el modelo). `expected_corrected`
 es el número de cambios que vio el revisor en el resumen: si ya no coincide → **409 stale_summary**.
-`{ "action": "reopen" }` la reabre. **409** si ya estaba finalizada / no lo estaba.
+`{ "action": "reopen" }` la reabre: queda `in_review` (abierta), aunque no haya decisiones.
+**409** si ya estaba finalizada / no lo estaba.
 **200** → mismo cuerpo que el PATCH.
 
 ### POST `/records/{id}/notes`
@@ -304,12 +319,16 @@ con autor y fecha, y en la bitácora (`action: "note"`).
 
 ---
 
-## 7 · Exportación (CSV)
+## 7 · Exportación
+
+### GET `/records/{id}/export.xlsx`
+**Clasificación por época** en Excel (botón «Exportar clasificación por época (Excel)»), archivo
+`<noche>_clasificacion_por_epoca.xlsx` (p. ej. `SC4001E0_clasificacion_por_epoca.xlsx`). Una fila por
+época: `epoca, hora, inicio_s, prediccion, confianza, segunda_opcion, p_W, p_N1, p_N2, p_N3, p_REM,
+marcada_revisar, estadio_final, revision (pendiente|confirmada|corregida), revisado_por, referencia`.
 
 ### GET `/records/{id}/export.csv`
-Una fila por época: `epoca, hora, inicio_s, prediccion, confianza, segunda_opcion,
-p_W, p_N1, p_N2, p_N3, p_REM, marcada_revisar, estadio_final, revision
-(pendiente|confirmada|corregida), revisado_por, referencia`.
+Las mismas columnas y filas en CSV (para scripts).
 
 ### GET `/corrections/export.csv`
 Todas las épocas confirmadas o corregidas por un especialista, en todos los registros:
