@@ -9,7 +9,7 @@ from datetime import datetime
 import numpy as np
 
 from .. import config
-from .edf_io import InvalidFile
+from .edf_io import InvalidFile, read_header
 
 _CODES = {"w": 0, "wake": 0, "1": 1, "n1": 1, "2": 2, "n2": 2,
           "3": 3, "4": 3, "n3": 3, "n4": 3, "r": 4, "rem": 4}
@@ -30,14 +30,15 @@ def read_reference(hyp_path: str, n_epochs: int, psg_start_iso: str | None = Non
         raise InvalidFile(f"No se pudo leer el hipnograma: {e}") from e
     # Si el hipnograma no empieza a la misma hora que el PSG, se corre su origen.
     offset = 0.0
-    if psg_start_iso and ann.orig_time is not None:
-        delta = (ann.orig_time.replace(tzinfo=None) - datetime.fromisoformat(psg_start_iso)).total_seconds()
+    hyp_start = read_header(hyp_path)["start"] if psg_start_iso else None
+    if hyp_start:
+        delta = (datetime.fromisoformat(hyp_start) - datetime.fromisoformat(psg_start_iso)).total_seconds()
         offset = delta if abs(delta) < 86400 else 0.0
     labels = np.full(n_epochs, -1, dtype=np.int16)
     for onset, duration, desc in zip(ann.onset, ann.duration, ann.description):
         e0 = int(round((onset + offset) / config.EPOCH_S))
         e1 = e0 + int(round(duration / config.EPOCH_S))
-        labels[max(0, e0):min(n_epochs, e1)] = stage_code(desc)
+        labels[max(0, e0):max(0, min(n_epochs, e1))] = stage_code(desc)
     if not (labels >= 0).any():
         raise InvalidFile("El hipnograma no trae estadios reconocibles (W, N1–N3 o S1–S4, REM).")
     return labels
