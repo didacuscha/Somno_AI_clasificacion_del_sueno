@@ -33,6 +33,31 @@ def test_salud_y_sesion(client):
     assert client.get(f"{API}/records", headers={"Authorization": "Bearer basura"}).status_code == 401
 
 
+def test_token_faltante_invalido_o_vencido(client, monkeypatch):
+    def msg(**kw):
+        r = client.get(f"{API}/records", **kw)
+        assert r.status_code == 401 and r.json()["error"]["code"] == "unauthorized"
+        return r.json()["error"]["message"]
+
+    assert "Falta" in msg()
+    assert "no es válido" in msg(headers={"Authorization": "Bearer basura"})
+    token = client.post(f"{API}/auth/login", json={"username": "superusuario",
+                        "password": config.USERS["superusuario"]["password"]}).json()["token"]
+    assert client.get(f"{API}/records", headers={"Authorization": "Bearer " + token}).status_code == 200
+    monkeypatch.setattr(config, "TOKEN_HOURS", -1)
+    viejo = client.post(f"{API}/auth/login", json={"username": "superusuario",
+                        "password": config.USERS["superusuario"]["password"]}).json()["token"]
+    assert "expiró" in msg(headers={"Authorization": "Bearer " + viejo})
+
+
+def test_swagger_declara_el_esquema_bearer(client):
+    spec = client.get("/openapi.json").json()
+    assert spec["components"]["securitySchemes"]["HTTPBearer"]["scheme"] == "bearer"
+    params = [p["name"].lower() for p in spec["paths"][f"{API}/records"]["get"].get("parameters", [])]
+    assert "authorization" not in params
+    assert spec["paths"][f"{API}/records"]["get"]["security"] == [{"HTTPBearer": []}]
+
+
 def test_configuracion_viene_del_adaptador(client, headers):
     cfg = client.get(f"{API}/config", headers=headers).json()
     assert cfg["confidence_threshold"] == 0.65 and cfg["night_review_fraction"] == 0.273

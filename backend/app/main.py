@@ -18,9 +18,10 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -101,15 +102,24 @@ def login(body: LoginBody):
     return {"token": token, "user": _public_user(username)}
 
 
-def auth(authorization: str = Header(default="")) -> dict:
+# Esquema «Bearer» declarado en OpenAPI: así /docs muestra el botón «Authorize» y envía el
+# token. (Swagger UI no envía un parámetro de encabezado llamado Authorization.)
+_bearer = HTTPBearer(auto_error=False, description="Token de POST /api/v1/auth/login")
+
+
+def auth(creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> dict:
+    if creds is None:
+        raise _err(401, "unauthorized", "Falta el token de sesión. Inicie sesión.")
     try:
-        raw = base64.urlsafe_b64decode(authorization.removeprefix("Bearer ").strip().encode()).decode()
+        raw = base64.urlsafe_b64decode(creds.credentials.strip().encode()).decode()
         username, exp, mac = raw.rsplit("|", 2)
-        ok = (hmac.compare_digest(mac, _sign(f"{username}|{exp}"))
-              and int(exp) > time.time() and username in config.USERS)
+        valid = hmac.compare_digest(mac, _sign(f"{username}|{exp}")) and username in config.USERS
+        expired = int(exp) <= time.time()
     except Exception:
-        ok = False
-    if not ok:
+        valid, expired = False, False
+    if not valid:
+        raise _err(401, "unauthorized", "El token de sesión no es válido. Inicie sesión de nuevo.")
+    if expired:
         raise _err(401, "unauthorized", "La sesión expiró. Inicie sesión de nuevo.")
     return _public_user(username)
 
