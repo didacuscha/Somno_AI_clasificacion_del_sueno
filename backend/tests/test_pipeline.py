@@ -1,6 +1,7 @@
 """Piezas del análisis: canales, EDF, épocas, adaptador del modelo, evidencia espectral,
 hipnograma, ventana, métricas, revisión y catálogo."""
 import io
+from datetime import datetime
 
 import numpy as np
 import pytest
@@ -8,7 +9,7 @@ import pytest
 from app import catalog, channels
 from app.model.adapter import InvalidModelOutput, StagingRequest, StagingResult, validate
 from app.pipeline import edf_io, epochs, hypnogram, metrics, review, spectral, window
-from edf_utils import write_psg
+from edf_utils import write_hypnogram, write_psg
 
 SLEEP_EDF_LABELS = ["EEG Fpz-Cz", "EEG Pz-Oz", "EOG horizontal", "Resp oro-nasal",
                     "EMG submental", "Temp rectal", "Event marker"]
@@ -176,6 +177,21 @@ def test_lee_el_hipnograma_y_la_ventana_de_sueno(files):
     assert ref[116] == 3 and ref[126] == 3          # S3 y S4 se unen en N3
     assert (ref[156:158] == -1).all()               # «Movement time» queda sin estadio
     assert hypnogram.sleep_window(ref) == (20, 220)
+
+
+@pytest.mark.xfail(strict=True, reason="read_reference no aplica el desfase entre hipnograma y PSG")
+def test_hipnograma_se_alinea_con_el_inicio_del_psg(tmp_path):
+    psg_start = "1989-04-24T00:00:00"
+    hyp = tmp_path / "desfasado-Hypnogram.edf"
+
+    stages = [("Sleep stage W", 10), ("Sleep stage 1", 10), ("Sleep stage 2", 30)]
+    write_hypnogram(hyp, stages, datetime(1989, 4, 23, 23, 50, 0))
+    ref = hypnogram.read_reference(str(hyp), 60, psg_start)
+    assert (ref[:30] == 2).all() and (ref[30:] == -1).all()
+
+    write_hypnogram(hyp, [("Sleep stage 2", 20)], datetime(1989, 4, 24, 0, 5, 0))
+    ref = hypnogram.read_reference(str(hyp), 60, psg_start)
+    assert (ref[:10] == -1).all() and (ref[10:30] == 2).all() and (ref[30:] == -1).all()
 
 
 def test_modos_de_ventana(files):
