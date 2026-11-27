@@ -149,6 +149,13 @@ dl.gl dd{margin:2px 0 0;color:var(--ink2)}
 
 /* ── preguntas frecuentes ── */
 .faq h4{margin-top:22px}
+/* ── video de demostración (Loom) ── */
+.video{margin-top:34px}
+.video > h2{font-size:20px;margin-bottom:4px}
+.video .frame{position:relative;aspect-ratio:1226/919;margin:12px 0 8px;border-radius:10px;overflow:hidden;
+  border:1px solid var(--border);background:var(--surface-2)}
+.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.video .cap{font-size:13px;color:var(--muted)}
 .foot{margin-top:46px;padding-top:16px;border-top:1px solid var(--border);font-size:13px;color:var(--muted)}
 
 /* ═════════ impresión / PDF (carta) ═════════ */
@@ -215,6 +222,7 @@ dl.gl dd{margin:2px 0 0;color:var(--ink2)}
     <h2>Contenido</h2>
     <ol>
       <li><a href="#rapida"><span class="n">·</span>Referencia rápida</a></li>
+      <li><a href="#video"><span class="n">▶</span>Video de demostración</a></li>
       <li><a href="#antes"><span class="n">1</span>Antes de empezar</a></li>
       <li><a href="#registros"><span class="n">2</span>Registros</a></li>
       <li><a href="#analizar"><span class="n">3</span>Analizar una noche</a></li>
@@ -289,6 +297,17 @@ dl.gl dd{margin:2px 0 0;color:var(--ink2)}
         </ul>
       </div>
     </div>
+  </div>
+
+  <!-- ══════════ VIDEO DE DEMOSTRACIÓN ══════════ -->
+  <div class="video noprint" id="video">
+    <h2>Video de demostración</h2>
+    <p class="muted small" style="margin:0">Un recorrido de unos 5 minutos por la aplicación, de principio a fin.</p>
+    <div class="frame">
+      <iframe src="https://www.loom.com/embed/c7f641d4c8d745089fd16733e627dbf3" title="Video de demostración de SomnoAI"
+        loading="lazy" allow="fullscreen; picture-in-picture" allowfullscreen></iframe>
+    </div>
+    <p class="cap">¿No se ve el video? <a href="https://www.loom.com/share/c7f641d4c8d745089fd16733e627dbf3" target="_blank" rel="noopener">Ábralo en Loom</a>.</p>
   </div>
 
   <!-- ══════════ 1 · ANTES DE EMPEZAR ══════════ -->
